@@ -1,0 +1,8 @@
+pandas
+numpy
+yfinance
+pyarrow
+PyPortfolioOpt
+scipy
+streamlit
+pytest
