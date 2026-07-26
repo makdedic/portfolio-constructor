@@ -4,12 +4,12 @@ found and changed in one place.
 """
 
 from datetime import date, timedelta
+from pathlib import Path
 
 # --- Ticker universe -------------------------------------------------------
-# Pass 1 uses a small, liquid, sector-diverse subset of the S&P 500 instead
-# of the full ~500 names. This keeps yfinance calls fast and reliable while
-# we get the whole pipeline connected end to end. Swap TICKER_UNIVERSE for a
-# full S&P 500 list later — nothing downstream needs to change.
+# First use a subset of the S&P 500 instead of the full ~500 names.
+# This keeps yfinance calls fast before we get the whole pipeline connected end to end.
+# Swap TICKER_UNIVERSE for a full S&P 500 list later — nothing downstream needs to change.
 DEV_TICKERS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",       # tech
     "JPM", "BAC", "WFC", "GS",                                     # financials
@@ -78,4 +78,8 @@ TRADING_DAYS_PER_YEAR = 252
 RISK_FREE_RATE_ANNUAL = 0.02
 
 # --- Storage -------------------------------------------------------------
-CACHE_DIR = "data/cache"
+# Anchored to the project root (not a relative path) so the cache always
+# lands in the same place regardless of which directory a script, test, or
+# notebook happens to be run from.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CACHE_DIR = PROJECT_ROOT / "data" / "cache"
