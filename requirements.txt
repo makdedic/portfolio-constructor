@@ -6,3 +6,5 @@ PyPortfolioOpt
 scipy
 streamlit
 pytest
+jupyterlab
+matplotlib
