@@ -53,7 +53,7 @@ DATA_START_DATE = date(
 DATA_END_DATE = date.today()
 
 # --- Rebalancing and portfolio construction ----------------------------------
-REBALANCE_FREQUENCY = "M"  # month-end, pandas offset alias
+REBALANCE_FREQUENCY = "ME"  # month-end, pandas offset alias
 TOP_N_HOLDINGS = 15  # stocks selected by the ranker before optimisation
 MAX_WEIGHT_PER_STOCK = 0.15  # optimiser bound, avoids single-name concentration
 TRANSACTION_COST_BPS = 10  # per rebalance, applied to traded notional (turnover)
