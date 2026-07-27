@@ -40,6 +40,21 @@ def score_stocks(
     return scored_factors.mean(axis=1)
 
 
+def score_by_momentum_only(
+    momentum: pd.Series, low_volatility: pd.Series, dividend_yield: pd.Series
+) -> pd.Series:
+    """Rank stocks by momentum alone, ignoring low-volatility and dividend yield.
+
+    Takes the same three factors as score_stocks (so the two are
+    interchangeable wherever a scoring function is expected), but only uses
+    momentum. A useful comparison: pure momentum chases whatever is
+    trending hardest — including high-growth, no-dividend, high-volatility
+    names that score_stocks structurally avoids — at the cost of being more
+    exposed to sharp momentum reversals.
+    """
+    return _zscore(momentum)
+
+
 def select_top_n(scores: pd.Series, n: int = config.TOP_N_HOLDINGS) -> pd.Index:
     """Tickers of the n highest-scoring stocks."""
     return scores.sort_values(ascending=False).head(n).index

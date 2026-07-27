@@ -59,16 +59,23 @@ def _training_window(universe_prices: pd.DataFrame, as_of_date: pd.Timestamp) ->
 
 
 def _select_target_weights(
-    universe_prices: pd.DataFrame, dividends: pd.DataFrame, as_of_date: pd.Timestamp
+    universe_prices: pd.DataFrame,
+    dividends: pd.DataFrame,
+    as_of_date: pd.Timestamp,
+    score_fn=ranker.score_stocks,
 ) -> dict[str, float]:
-    """Rank the universe and optimise weights using only the trailing training window."""
+    """Rank the universe and optimise weights using only the trailing training window.
+
+    score_fn swaps in a different ranking rule (e.g. ranker.score_by_momentum_only)
+    without changing anything else about the walk-forward mechanics.
+    """
     training_window = _training_window(universe_prices, as_of_date)
 
     momentum = features.compute_momentum(training_window, as_of_date)
     low_volatility = features.compute_low_volatility(training_window, as_of_date)
     dividend_yield = features.compute_dividend_yield(dividends, training_window, as_of_date)
 
-    scores = ranker.score_stocks(momentum, low_volatility, dividend_yield)
+    scores = score_fn(momentum, low_volatility, dividend_yield)
     top_holdings = ranker.select_top_n(scores, n=config.TOP_N_HOLDINGS)
 
     return optimise.max_sharpe_weights(training_window[list(top_holdings)])
@@ -128,9 +135,10 @@ def _strategy_returns(
     dividends: pd.DataFrame,
     rebalance_dates: list[pd.Timestamp],
     end: pd.Timestamp,
+    score_fn=ranker.score_stocks,
 ) -> tuple[pd.Series, pd.Series, list[dict]]:
     def get_target_weights(rebalance_date: pd.Timestamp) -> dict[str, float]:
-        return _select_target_weights(universe_prices, dividends, rebalance_date)
+        return _select_target_weights(universe_prices, dividends, rebalance_date, score_fn)
 
     return _run_rebalanced_series(universe_prices, rebalance_dates, end, get_target_weights)
 
@@ -163,10 +171,15 @@ def run_backtest(
     benchmark_ticker: str = config.BENCHMARK_TICKER,
     start: pd.Timestamp = config.BACKTEST_START_DATE,
     end: pd.Timestamp = config.BACKTEST_END_DATE,
+    score_fn=ranker.score_stocks,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Walk-forward backtest: strategy vs. equal-weight and S&P 500
     benchmarks (claude.md rule 5), each reported gross and net of the
     configured transaction cost (rule 3).
+
+    score_fn selects the ranking rule (default: the momentum/low-vol/
+    dividend-yield composite in ranker.score_stocks). Pass
+    ranker.score_by_momentum_only to compare a pure-momentum variant.
     """
     start, end = pd.Timestamp(start), pd.Timestamp(end)
     universe_prices = prices[tickers]
@@ -175,7 +188,7 @@ def run_backtest(
     rebalance_dates = get_rebalance_dates(universe_prices, start, end)
 
     strategy_gross, strategy_net, rebalance_log = _strategy_returns(
-        universe_prices, dividends, rebalance_dates, end
+        universe_prices, dividends, rebalance_dates, end, score_fn
     )
     equal_weight_gross, equal_weight_net, _ = _equal_weight_returns(universe_prices, rebalance_dates, end)
     sp500_gross, sp500_net = _benchmark_returns(benchmark_prices, rebalance_dates[0], end)
