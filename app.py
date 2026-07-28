@@ -32,22 +32,30 @@ selected_tickers = st.sidebar.multiselect(
 )
 run_clicked = st.sidebar.button("Run backtest", type="primary")
 
-if not run_clicked:
+# st.button() only returns True on the exact rerun triggered by that click —
+# every other widget on the page (like the date selector below) also
+# triggers a full script rerun, on which the button reads False again. So
+# results are stashed in session_state on click and reused on every rerun
+# after that; otherwise changing the date selector would silently wipe the
+# page and demand another click of "Run backtest" to see anything.
+if run_clicked:
+    # Fewer tickers than this makes MAX_WEIGHT_PER_STOCK infeasible: the
+    # optimiser can never make weights that are each capped at, say, 15% sum
+    # to 100% with fewer than ~7 stocks to spread them across.
+    min_tickers = math.ceil(1 / config.MAX_WEIGHT_PER_STOCK)
+    if len(selected_tickers) < min_tickers:
+        st.error(
+            f"Select at least {min_tickers} tickers — fewer makes the "
+            f"{config.MAX_WEIGHT_PER_STOCK:.0%} per-stock weight cap infeasible."
+        )
+        st.stop()
+    st.session_state["results"] = run_pipeline_cached(tuple(selected_tickers))
+
+if "results" not in st.session_state:
     st.info("Choose a ticker universe in the sidebar and click **Run backtest** to get started.")
     st.stop()
 
-# Fewer tickers than this makes MAX_WEIGHT_PER_STOCK infeasible: the
-# optimiser can never make weights that are each capped at, say, 15% sum to
-# 100% with fewer than ~7 stocks to spread them across.
-min_tickers = math.ceil(1 / config.MAX_WEIGHT_PER_STOCK)
-if len(selected_tickers) < min_tickers:
-    st.error(
-        f"Select at least {min_tickers} tickers — fewer makes the "
-        f"{config.MAX_WEIGHT_PER_STOCK:.0%} per-stock weight cap infeasible."
-    )
-    st.stop()
-
-results = run_pipeline_cached(tuple(selected_tickers))
+results = st.session_state["results"]
 
 rebalance_dates_newest_first = list(results["rebalance_log"].index[::-1])
 selected_rebalance_date = st.selectbox(
