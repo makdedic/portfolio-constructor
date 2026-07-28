@@ -1,5 +1,6 @@
-"""Guards rules 2, 3, and 5: rolling (never full-history) training windows,
-transaction costs applied correctly, and both benchmarks always present.
+"""Guards rules 3 and 5: transaction costs applied correctly, and both
+benchmarks always present. (Rule 2, the rolling training window itself, is
+tested in test_features.py alongside features.training_window.)
 """
 
 import numpy as np
@@ -43,26 +44,6 @@ def test_get_rebalance_dates_returns_month_ends_in_range():
     assert len(rebalance_dates) == 6  # Jan through Jun
     assert all(start <= d <= end for d in rebalance_dates)
     assert list(rebalance_dates) == sorted(rebalance_dates)  # strictly increasing
-
-
-def test_training_window_is_rolling_never_full_history():
-    prices = _synthetic_universe()
-    rebalance_dates = backtest.get_rebalance_dates(prices, pd.Timestamp("2018-01-01"), pd.Timestamp("2018-06-30"))
-
-    window_start_dates = []
-    for rebalance_date in rebalance_dates:
-        window = backtest._training_window(prices, rebalance_date)
-
-        # Rule 1: nothing in the window is on or after the rebalance date.
-        assert window.index.max() < rebalance_date
-        # Rule 2: the window is a ~3-year slice, not everything available
-        # before the rebalance date (the full history goes back to 2015-01).
-        assert window.index.min() > pd.Timestamp("2015-01-01")
-        window_start_dates.append(window.index.min())
-
-    # And it actually rolls forward each month rather than staying fixed.
-    assert window_start_dates == sorted(window_start_dates)
-    assert window_start_dates[0] < window_start_dates[-1]
 
 
 def test_transaction_cost_matches_turnover_exactly():
