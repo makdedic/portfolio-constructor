@@ -20,7 +20,7 @@ def max_sharpe_weights(
     Covariance is estimated with Ledoit-Wolf shrinkage rather than the raw
     sample covariance: with only a few years of daily data, the raw sample
     covariance matrix is noisy, and shrinkage pulls it toward a more stable,
-    structured estimate. Never break this rule (claude.md rule 4) — there is
+    structured estimate. Never break this rule (rule 4) — there is
     no code path here using raw sample covariance.
     """
     expected_annual_returns = expected_returns.mean_historical_return(

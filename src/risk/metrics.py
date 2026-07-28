@@ -1,6 +1,6 @@
 """Risk metrics computed on a daily portfolio-return series.
 
-claude.md rule 6: never report raw returns alone. Every metric here answers
+rule 6: never report raw returns alone. Every metric here answers
 a different question about risk, and a bank/fund risk desk would expect all
 of them, not just average return.
 """

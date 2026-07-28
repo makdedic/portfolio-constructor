@@ -33,14 +33,13 @@ def test_ledoit_wolf_shrinks_every_covariance_toward_zero():
 
     # Ledoit-Wolf shrinkage pulls every off-diagonal covariance strictly
     # toward zero, so its magnitude must be strictly smaller than the raw
-    # sample estimate's — this is the concrete, checkable form of rule 4.
+    # sample estimate's — this is rule 4.
     assert np.all(np.abs(shrunk_off_diagonal) < np.abs(raw_off_diagonal))
 
 
 def test_max_sharpe_weights_sum_to_one_and_respect_bounds():
     # Enough tickers that the MAX_WEIGHT_PER_STOCK cap can still sum to 1.0
-    # (fewer tickers than 1 / MAX_WEIGHT_PER_STOCK makes the constraint
-    # infeasible — that's a real optimiser behaviour, not a test artefact).
+    # (fewer tickers than 1 / MAX_WEIGHT_PER_STOCK makes the constraint infeasible.
     n_tickers = int(np.ceil(1 / config.MAX_WEIGHT_PER_STOCK)) + 1
     prices = _synthetic_prices(n_tickers)
     weights = optimise.max_sharpe_weights(prices, risk_free_rate=0.02)

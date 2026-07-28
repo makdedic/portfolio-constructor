@@ -174,7 +174,7 @@ def run_backtest(
     score_fn=ranker.score_stocks,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Walk-forward backtest: strategy vs. equal-weight and S&P 500
-    benchmarks (claude.md rule 5), each reported gross and net of the
+    benchmarks (rule 5), each reported gross and net of the
     configured transaction cost (rule 3).
 
     score_fn selects the ranking rule (default: the momentum/low-vol/
