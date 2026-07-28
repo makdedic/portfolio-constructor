@@ -1,8 +1,10 @@
 """Mean-variance portfolio optimisation with Ledoit-Wolf covariance shrinkage.
 
 Risk-parity optimisation is deferred to a later pass; backtest.py calls this
-module through an `optimisation_method` parameter so adding risk-parity
-later doesn't require changing the backtest loop's structure.
+module through an `optimiser_fn` parameter (see `_select_target_weights` and
+`run_backtest`) so adding a `risk_parity_weights` function here later doesn't
+require changing the backtest loop's structure — just matching the same
+`(prices) -> dict[str, float]` contract as `max_sharpe_weights`.
 """
 
 import pandas as pd

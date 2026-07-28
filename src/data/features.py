@@ -25,6 +25,23 @@ def _price_on_or_before(prices: pd.DataFrame, target_date: pd.Timestamp) -> pd.S
     return eligible.iloc[-1]
 
 
+def training_window(
+    prices: pd.DataFrame, as_of_date, years: int = config.TRAIN_WINDOW_YEARS, extra_months: int = 0
+) -> pd.DataFrame:
+    """Rolling window strictly before as_of_date — the single mechanism
+    enforcing both rule 1 (no lookahead) and rule 2 (rolling, never full
+    history) for anything computed from it.
+
+    extra_months widens the window's start without moving its end, for
+    callers whose earliest usable snapshot needs its own lookback room
+    before the window itself starts (e.g. a multi-date training panel,
+    rather than a single as-of-date query).
+    """
+    as_of_ts = pd.Timestamp(as_of_date)
+    window_start = as_of_ts - pd.DateOffset(years=years, months=extra_months)
+    return prices.loc[(prices.index >= window_start) & (prices.index < as_of_ts)]
+
+
 def compute_momentum(prices: pd.DataFrame, as_of_date) -> pd.Series:
     """12-1 month momentum: return from 12 months ago to 1 month ago.
 
