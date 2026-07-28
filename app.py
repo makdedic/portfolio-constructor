@@ -49,12 +49,17 @@ if len(selected_tickers) < min_tickers:
 
 results = run_pipeline_cached(tuple(selected_tickers))
 
-latest_rebalance_date = results["rebalance_log"].index[-1]
-latest_weights = results["rebalance_log"]["weights"].iloc[-1]
-weights_series = pd.Series(latest_weights).sort_values(ascending=False)
+rebalance_dates_newest_first = list(results["rebalance_log"].index[::-1])
+selected_rebalance_date = st.selectbox(
+    "View holdings as of",
+    options=rebalance_dates_newest_first,
+    format_func=lambda d: d.date().isoformat(),
+)
+selected_weights = results["rebalance_log"]["weights"].loc[selected_rebalance_date]
+weights_series = pd.Series(selected_weights).sort_values(ascending=False)
 weights_series = weights_series[weights_series > 0]
 
-st.header(f"Current holdings (as of {latest_rebalance_date.date()})")
+st.header(f"Holdings as of {selected_rebalance_date.date()}")
 weights_col, table_col = st.columns([2, 1])
 with weights_col:
     st.bar_chart(weights_series)
