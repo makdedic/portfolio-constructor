@@ -77,6 +77,16 @@ TRADING_DAYS_PER_YEAR = 252
 # solving it, so it stays a named constant until FRED ingestion lands.
 RISK_FREE_RATE_ANNUAL = 0.02
 
+# --- LightGBM ranker -------------------------------------------------------
+# The training panel is only ~1,000-1,300 rows (~39 tickers x ~30 monthly
+# snapshots), so these stay conservative to avoid overfitting. LightGBM's
+# own default min_child_samples (20) is high enough relative to this row
+# count that it can produce a near-constant, unhelpful predictor — lower it.
+LGBM_N_ESTIMATORS = 50
+LGBM_MAX_DEPTH = 3
+LGBM_LEARNING_RATE = 0.05
+LGBM_MIN_CHILD_SAMPLES = 10
+
 # --- Storage -------------------------------------------------------------
 # Anchored to the project root (not a relative path) so the cache always
 # lands in the same place regardless of which directory a script, test, or
