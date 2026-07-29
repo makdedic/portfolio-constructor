@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.models import lgbm_ranker
 from src.portfolio import backtest
 
 
@@ -17,6 +18,23 @@ def _synthetic_universe(n_tickers: int = 5) -> pd.DataFrame:
     """
     rng = np.random.default_rng(7)
     dates = pd.bdate_range("2015-01-01", "2018-12-31")
+    columns = [f"T{i}" for i in range(n_tickers)] + ["BENCH"]
+    daily_returns = rng.normal(loc=0.0005, scale=0.01, size=(len(dates), len(columns)))
+    return 100 * (1 + pd.DataFrame(daily_returns, index=dates, columns=columns)).cumprod()
+
+
+def _synthetic_universe_long(n_tickers: int = 8) -> pd.DataFrame:
+    """~5 years of daily prices, one more than _synthetic_universe()'s 4.
+
+    lgbm_ranker.rank_by_lgbm's training panel needs a wider lookback than
+    the composite ranker: its earliest snapshot (at the start of the
+    3-year TRAIN_WINDOW_YEARS span) needs its own 12-month momentum
+    lookback *before itself*, not just before as_of_date — about one
+    extra year of history reaching back from the first 2018-01-31
+    rebalance, not the plain 3-year window a single snapshot needs.
+    """
+    rng = np.random.default_rng(13)
+    dates = pd.bdate_range("2013-06-01", "2018-12-31")
     columns = [f"T{i}" for i in range(n_tickers)] + ["BENCH"]
     daily_returns = rng.normal(loc=0.0005, scale=0.01, size=(len(dates), len(columns)))
     return 100 * (1 + pd.DataFrame(daily_returns, index=dates, columns=columns)).cumprod()
@@ -113,3 +131,22 @@ def test_both_benchmarks_present_and_aligned_to_strategy_dates():
     # comparing strategy to benchmarks day by day wouldn't be valid.
     assert daily_returns.index.is_monotonic_increasing
     assert daily_returns.notna().all(axis=None)
+
+
+def test_lgbm_ranker_works_end_to_end_in_the_walk_forward_loop():
+    prices = _synthetic_universe_long()
+    tickers = [c for c in prices.columns if c != "BENCH"]
+    dividends = _synthetic_dividends(tickers)
+
+    daily_returns, rebalance_log = backtest.run_backtest(
+        prices,
+        dividends,
+        tickers=tickers,
+        benchmark_ticker="BENCH",
+        start=pd.Timestamp("2018-01-01"),
+        end=pd.Timestamp("2018-04-30"),
+        rank_fn=lgbm_ranker.rank_by_lgbm,
+    )
+
+    assert len(rebalance_log) > 0
+    assert not daily_returns.isna().any(axis=None)

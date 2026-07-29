@@ -1,7 +1,7 @@
 """Guards the LightGBM training panel's lookahead safety (rule 1) and
 rolling-window sizing (rule 2) — the trickiest part of this ranker, since
 it builds many historical (feature, forward-return) examples rather than
-a single snapshot.
+a single snapshot — plus rank_by_lgbm's determinism and output contract.
 """
 
 import numpy as np
@@ -89,3 +89,29 @@ def test_panel_builder_raises_a_clear_error_when_history_is_too_short():
 
     with pytest.raises(ValueError, match="[Nn]ot enough"):
         lgbm_ranker._build_training_panel(prices, dividends, as_of_date)
+
+
+def test_rank_by_lgbm_is_deterministic():
+    universe_prices = _synthetic_universe()
+    dividends = _synthetic_dividends(list(universe_prices.columns))
+    as_of_date = pd.Timestamp("2018-01-31")
+
+    first = lgbm_ranker.rank_by_lgbm(universe_prices, dividends, as_of_date)
+    second = lgbm_ranker.rank_by_lgbm(universe_prices, dividends, as_of_date)
+
+    pd.testing.assert_series_equal(first, second)
+
+
+def test_rank_by_lgbm_matches_score_stocks_output_contract():
+    universe_prices = _synthetic_universe()
+    dividends = _synthetic_dividends(list(universe_prices.columns))
+    as_of_date = pd.Timestamp("2018-01-31")
+
+    scores = lgbm_ranker.rank_by_lgbm(universe_prices, dividends, as_of_date)
+
+    # Same shape as ranker.score_stocks's output: a numeric Series covering
+    # every ticker in the universe, so select_top_n works unchanged
+    # regardless of which ranker produced it.
+    assert isinstance(scores, pd.Series)
+    assert set(scores.index) == set(universe_prices.columns)
+    assert not scores.isna().any()
