@@ -96,16 +96,13 @@ def _build_training_panel(universe_prices: pd.DataFrame, dividends: pd.DataFrame
     return pd.concat(panel_rows, ignore_index=True)
 
 
-def rank_by_lgbm(universe_prices: pd.DataFrame, dividends: pd.DataFrame, as_of_date) -> pd.Series:
-    """Predict next-month return per ticker with a LightGBM model trained
-    fresh on this call's own training panel.
+def _fit_model(training_panel: pd.DataFrame) -> LGBMRegressor:
+    """Fit a fresh LGBMRegressor on a training panel's features and label.
 
-    Same (universe_prices, dividends, as_of_date) -> scores contract as
-    ranker.rank_by_composite_score, so it's a drop-in rank_fn for
-    backtest.run_backtest.
+    Pulled out on its own (rather than inlined in rank_by_lgbm) so the
+    hyperparameters live in exactly one place — including for callers that
+    just want the fitted model itself, e.g. to inspect feature_importances_.
     """
-    training_panel = _build_training_panel(universe_prices, dividends, as_of_date)
-
     model = LGBMRegressor(
         n_estimators=config.LGBM_N_ESTIMATORS,
         max_depth=config.LGBM_MAX_DEPTH,
@@ -117,6 +114,19 @@ def rank_by_lgbm(universe_prices: pd.DataFrame, dividends: pd.DataFrame, as_of_d
         verbose=-1,
     )
     model.fit(training_panel[_FEATURE_COLUMNS], training_panel["forward_return"])
+    return model
+
+
+def rank_by_lgbm(universe_prices: pd.DataFrame, dividends: pd.DataFrame, as_of_date) -> pd.Series:
+    """Predict next-month return per ticker with a LightGBM model trained
+    fresh on this call's own training panel.
+
+    Same (universe_prices, dividends, as_of_date) -> scores contract as
+    ranker.rank_by_composite_score, so it's a drop-in rank_fn for
+    backtest.run_backtest.
+    """
+    training_panel = _build_training_panel(universe_prices, dividends, as_of_date)
+    model = _fit_model(training_panel)
 
     # The current snapshot uses the standard (unwidened) window, same as
     # every other ranker — only the training panel's earliest rows needed
