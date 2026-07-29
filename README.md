@@ -51,7 +51,7 @@ reliable to run while it's still being built out:
 - **Dashboard** (`app.py`) — Streamlit app: pick a ticker universe, run
   the backtest, browse holdings at any historical rebalance date, compare
   risk metrics, see the cumulative-growth chart
-- **Notebook** (`notebooks/01_explore_data_and_factors.ipynb`) — scratch
+- **Notebook** (`notebooks/01_pass1_exploration.ipynb`) — scratch
   space for exploring the pipeline interactively, one stage at a time
 
 **Deferred to a later pass** (breadth, not correctness — the six rules
@@ -82,7 +82,7 @@ python3 -m pytest tests/unit -v
 
 ```bash
 source .venv/bin/activate
-jupyter lab notebooks/01_explore_data_and_factors.ipynb
+jupyter lab notebooks/01_pass1_exploration.ipynb
 # or open it in VS Code and select the "portfolio-constructor" kernel
 ```
 
@@ -127,7 +127,9 @@ portfolio-constructor/
 │       └── metrics.py       # Sharpe, Sortino, drawdown, VaR, CVaR, breaches
 ├── app.py                   # Streamlit dashboard
 ├── notebooks/
-│   └── 01_explore_data_and_factors.ipynb
+│   ├── 01_pass1_exploration.ipynb
+│   ├── 02_sortino_optimisation_experiment.ipynb
+│   └── 03_pass2_exploration.ipynb
 ├── tests/unit/               # fast, offline, synthetic-data tests
 └── data/cache/               # gitignored Parquet cache (created on first run)
 ```
