@@ -71,11 +71,12 @@ MONTE_CARLO_SIMULATIONS = 10_000
 RANDOM_SEED = 42
 TRADING_DAYS_PER_YEAR = 252
 
-# Placeholder flat risk-free rate. A later pass replaces this with the FRED
-# 3-month T-bill series via pandas-datareader; using 0 magic numbers here
-# would just move the same problem into ranker.py/metrics.py instead of
-# solving it, so it stays a named constant until FRED ingestion lands.
+# Flat fallback risk-free rate, used when no FRED series is supplied (e.g.
+# synthetic-data unit tests, or a quick run without network access). Real
+# runs use the actual daily FRED 3-month T-bill history instead — see
+# RISK_FREE_RATE_FRED_SERIES and src/data/ingest.py.
 RISK_FREE_RATE_ANNUAL = 0.02
+RISK_FREE_RATE_FRED_SERIES = "DTB3"  # 3-month T-bill, secondary market rate
 
 # --- LightGBM ranker -------------------------------------------------------
 # The training panel is only ~1,000-1,300 rows (~39 tickers x ~30 monthly

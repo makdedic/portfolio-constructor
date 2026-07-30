@@ -10,6 +10,7 @@ from datetime import date
 
 import pandas as pd
 import yfinance as yf
+from pandas_datareader import data as pdr
 
 from src import config
 
@@ -79,3 +80,27 @@ def load_or_fetch_dividends(tickers: list[str], start: date, end: date) -> pd.Da
     os.makedirs(config.CACHE_DIR, exist_ok=True)
     dividends.to_parquet(path)
     return dividends
+
+
+def fetch_risk_free_rate(start: date, end: date) -> pd.DataFrame:
+    """Daily annualised risk-free rate from FRED's 3-month T-bill series
+    (config.RISK_FREE_RATE_FRED_SERIES): date, risk_free_rate_annual.
+
+    FRED quotes this as a percentage and only publishes on days the
+    Treasury reports — divide by 100 and forward-fill gaps so every
+    trading day in range has a value.
+    """
+    raw = pdr.DataReader(config.RISK_FREE_RATE_FRED_SERIES, "fred", start, end)
+    rate = (raw[config.RISK_FREE_RATE_FRED_SERIES] / 100).ffill().rename("risk_free_rate_annual")
+    return rate.reset_index().rename(columns={"DATE": "date"})
+
+
+def load_or_fetch_risk_free_rate(start: date, end: date) -> pd.DataFrame:
+    """Read cached risk-free rate history if present, otherwise fetch and cache it."""
+    path = os.path.join(config.CACHE_DIR, "risk_free_rate.parquet")
+    if os.path.exists(path):
+        return pd.read_parquet(path)
+    rate = fetch_risk_free_rate(start, end)
+    os.makedirs(config.CACHE_DIR, exist_ok=True)
+    rate.to_parquet(path)
+    return rate

@@ -10,3 +10,4 @@ jupyterlab
 matplotlib
 lightgbm
 cvxpy
+pandas-datareader
