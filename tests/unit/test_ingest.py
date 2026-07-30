@@ -59,6 +59,34 @@ def test_load_or_fetch_sp500_tickers_fetches_and_caches_when_missing(tmp_path):
     assert (tmp_path / "sp500_tickers.parquet").exists()
 
 
+def test_load_or_fetch_prices_with_distinct_cache_names_do_not_clobber_each_other(tmp_path):
+    dev_prices = pd.DataFrame({"date": ["2020-01-01"], "ticker": ["AAPL"], "adj_close": [100.0]})
+    sp500_prices = pd.DataFrame(
+        {"date": ["2020-01-01"] * 2, "ticker": ["AAPL", "MSFT"], "adj_close": [100.0, 200.0]}
+    )
+
+    with patch("src.data.ingest.config.CACHE_DIR", str(tmp_path)):
+        with patch("src.data.ingest.fetch_price_history", side_effect=[dev_prices, sp500_prices]):
+            dev_result = ingest.load_or_fetch_prices(["AAPL"], "2020-01-01", "2020-01-01", cache_name="prices_dev")
+            sp500_result = ingest.load_or_fetch_prices(
+                ["AAPL", "MSFT"], "2020-01-01", "2020-01-01", cache_name="prices_sp500"
+            )
+
+        # Re-reading each by its own cache_name must return what was cached
+        # under that name, not the other run's data.
+        with patch("src.data.ingest.fetch_price_history") as fetch_mock:
+            dev_reread = ingest.load_or_fetch_prices(["AAPL"], "2020-01-01", "2020-01-01", cache_name="prices_dev")
+            sp500_reread = ingest.load_or_fetch_prices(
+                ["AAPL", "MSFT"], "2020-01-01", "2020-01-01", cache_name="prices_sp500"
+            )
+
+    fetch_mock.assert_not_called()
+    assert len(dev_result) == 1 and len(dev_reread) == 1
+    assert len(sp500_result) == 2 and len(sp500_reread) == 2
+    assert (tmp_path / "prices_dev.parquet").exists()
+    assert (tmp_path / "prices_sp500.parquet").exists()
+
+
 def test_tickers_with_complete_history_excludes_only_incomplete_tickers():
     dates = pd.bdate_range("2020-01-01", periods=5)
     wide_prices = pd.DataFrame(

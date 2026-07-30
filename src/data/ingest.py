@@ -56,15 +56,17 @@ def to_wide_adj_close(price_long: pd.DataFrame) -> pd.DataFrame:
     return price_long.pivot(index="date", columns="ticker", values="adj_close")
 
 
-def load_or_fetch_prices(tickers: list[str], start: date, end: date) -> pd.DataFrame:
+def load_or_fetch_prices(
+    tickers: list[str], start: date, end: date, cache_name: str = "prices"
+) -> pd.DataFrame:
     """Read cached price history if present, otherwise fetch and cache it.
 
-    Pass 1 has one fixed ticker universe and date range (config.py), so a
-    single cache file per dataset is enough — it doesn't check whether the
-    cached tickers/dates still match the request. Revisit this if the
-    universe or date range starts changing between runs.
+    cache_name distinguishes runs against different universes (e.g. the dev
+    ticker subset vs. the full S&P 500) so they don't clobber or misread
+    each other's cache file — pass a distinct name whenever tickers isn't
+    config.TICKER_UNIVERSE.
     """
-    path = os.path.join(config.CACHE_DIR, "prices.parquet")
+    path = os.path.join(config.CACHE_DIR, f"{cache_name}.parquet")
     if os.path.exists(path):
         return pd.read_parquet(path)
     prices = fetch_price_history(tickers, start, end)
@@ -73,9 +75,15 @@ def load_or_fetch_prices(tickers: list[str], start: date, end: date) -> pd.DataF
     return prices
 
 
-def load_or_fetch_dividends(tickers: list[str], start: date, end: date) -> pd.DataFrame:
-    """Read cached dividend history if present, otherwise fetch and cache it."""
-    path = os.path.join(config.CACHE_DIR, "dividends.parquet")
+def load_or_fetch_dividends(
+    tickers: list[str], start: date, end: date, cache_name: str = "dividends"
+) -> pd.DataFrame:
+    """Read cached dividend history if present, otherwise fetch and cache it.
+
+    cache_name distinguishes runs against different universes, same as
+    load_or_fetch_prices.
+    """
+    path = os.path.join(config.CACHE_DIR, f"{cache_name}.parquet")
     if os.path.exists(path):
         return pd.read_parquet(path)
     dividends = fetch_dividends(tickers, start, end)
