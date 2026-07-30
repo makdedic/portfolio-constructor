@@ -53,18 +53,25 @@ def _select_target_weights(
     as_of_date: pd.Timestamp,
     rank_fn=ranker.rank_by_composite_score,
     optimiser_fn=optimise.max_sharpe_weights,
+    risk_free_rate: pd.Series = None,
 ) -> dict[str, float]:
     """Rank the universe and optimise weights among the top holdings.
 
     rank_fn swaps in a different ranking rule (e.g. ranker.rank_by_momentum_only)
     and optimiser_fn swaps in a different portfolio construction method —
     neither changes anything else about the walk-forward mechanics.
+
+    risk_free_rate is a date-indexed Series of actual historical rates (e.g.
+    from FRED), or None to fall back to the flat config constant. Series.asof
+    looks up the rate known as of as_of_date — never a later one, so this
+    stays walk-forward-safe the same way every other feature does (rule 1).
     """
     scores = rank_fn(universe_prices, dividends, as_of_date)
     top_holdings = ranker.select_top_n(scores, n=config.TOP_N_HOLDINGS)
 
     training_window = features.training_window(universe_prices, as_of_date)
-    return optimiser_fn(training_window[list(top_holdings)])
+    rate = config.RISK_FREE_RATE_ANNUAL if risk_free_rate is None else risk_free_rate.asof(as_of_date)
+    return optimiser_fn(training_window[list(top_holdings)], risk_free_rate=rate)
 
 
 def _run_rebalanced_series(
@@ -123,9 +130,12 @@ def _strategy_returns(
     end: pd.Timestamp,
     rank_fn=ranker.rank_by_composite_score,
     optimiser_fn=optimise.max_sharpe_weights,
+    risk_free_rate: pd.Series = None,
 ) -> tuple[pd.Series, pd.Series, list[dict]]:
     def get_target_weights(rebalance_date: pd.Timestamp) -> dict[str, float]:
-        return _select_target_weights(universe_prices, dividends, rebalance_date, rank_fn, optimiser_fn)
+        return _select_target_weights(
+            universe_prices, dividends, rebalance_date, rank_fn, optimiser_fn, risk_free_rate
+        )
 
     return _run_rebalanced_series(universe_prices, rebalance_dates, end, get_target_weights)
 
@@ -160,6 +170,7 @@ def run_backtest(
     end: pd.Timestamp = config.BACKTEST_END_DATE,
     rank_fn=ranker.rank_by_composite_score,
     optimiser_fn=optimise.max_sharpe_weights,
+    risk_free_rate: pd.Series = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Walk-forward backtest: strategy vs. equal-weight and S&P 500
     benchmarks (rule 5), each reported gross and net of the
@@ -170,6 +181,9 @@ def run_backtest(
     ranker.rank_by_momentum_only to compare a pure-momentum variant.
     optimiser_fn selects the portfolio construction method (default:
     mean-variance max Sharpe with Ledoit-Wolf shrinkage).
+    risk_free_rate is a date-indexed Series of actual historical rates
+    (e.g. from ingest.load_or_fetch_risk_free_rate), or None to fall back
+    to the flat config.RISK_FREE_RATE_ANNUAL constant.
     """
     start, end = pd.Timestamp(start), pd.Timestamp(end)
     universe_prices = prices[tickers]
@@ -178,7 +192,7 @@ def run_backtest(
     rebalance_dates = get_rebalance_dates(universe_prices, start, end)
 
     strategy_gross, strategy_net, rebalance_log = _strategy_returns(
-        universe_prices, dividends, rebalance_dates, end, rank_fn, optimiser_fn
+        universe_prices, dividends, rebalance_dates, end, rank_fn, optimiser_fn, risk_free_rate
     )
     equal_weight_gross, equal_weight_net, _ = _equal_weight_returns(universe_prices, rebalance_dates, end)
     sp500_gross, sp500_net = _benchmark_returns(benchmark_prices, rebalance_dates[0], end)

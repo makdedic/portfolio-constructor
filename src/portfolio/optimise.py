@@ -56,12 +56,17 @@ def _cap_and_redistribute(weights: dict[str, float], max_weight: float) -> dict[
     return weights
 
 
-def risk_parity_weights(prices: pd.DataFrame) -> dict[str, float]:
+def risk_parity_weights(prices: pd.DataFrame, risk_free_rate: float | None = None) -> dict[str, float]:
     """Weights such that every holding contributes equally to total
     portfolio risk (Equal Risk Contribution), rather than being weighted
     toward the best *estimated* returns the way max_sharpe_weights is —
     return estimates are noisy, so risk parity sidesteps them entirely and
     balances risk contributions instead.
+
+    risk_free_rate is accepted but unused: it only exists so this function
+    matches max_sharpe_weights' call signature for backtest.py's pluggable
+    optimiser_fn contract. ERC never references expected returns, so there
+    is nothing for a risk-free rate to do here.
 
     Solved via the standard convex reformulation (Maillard, Roncalli &
     Teiletche, 2010): minimising 0.5 * w'Σw - sum(ln(w_i)) over w > 0 (no

@@ -152,6 +152,66 @@ def test_lgbm_ranker_works_end_to_end_in_the_walk_forward_loop():
     assert not daily_returns.isna().any(axis=None)
 
 
+def test_select_target_weights_looks_up_the_risk_free_rate_as_of_the_rebalance_date():
+    prices = _synthetic_universe(n_tickers=8)
+    tickers = [c for c in prices.columns if c != "BENCH"]
+    dividends = _synthetic_dividends(tickers)
+
+    # Rate is 2% up to and including 2018-01-15, then jumps to 6% - well
+    # below the synthetic assets' ~12% mean return so max_sharpe stays
+    # feasible - and stays 6% right through the fixture's last date, so a
+    # rate dated *after* an early rebalance is present too, proving asof
+    # never looks ahead into it (rule 1).
+    rate_dates = prices.index
+    risk_free_rate = pd.Series(
+        [0.02 if d <= pd.Timestamp("2018-01-15") else 0.06 for d in rate_dates], index=rate_dates
+    )
+
+    received_rates = []
+
+    def recording_optimiser(prices, risk_free_rate):
+        received_rates.append(risk_free_rate)
+        return optimise.max_sharpe_weights(prices, risk_free_rate=risk_free_rate)
+
+    backtest._select_target_weights(
+        prices[tickers],
+        dividends,
+        pd.Timestamp("2018-01-10"),
+        optimiser_fn=recording_optimiser,
+        risk_free_rate=risk_free_rate,
+    )
+    backtest._select_target_weights(
+        prices[tickers],
+        dividends,
+        pd.Timestamp("2018-01-31"),
+        optimiser_fn=recording_optimiser,
+        risk_free_rate=risk_free_rate,
+    )
+
+    assert received_rates[0] == pytest.approx(0.02)
+    assert received_rates[1] == pytest.approx(0.06)
+
+
+def test_run_backtest_accepts_a_risk_free_rate_series_end_to_end():
+    prices = _synthetic_universe(n_tickers=8)
+    tickers = [c for c in prices.columns if c != "BENCH"]
+    dividends = _synthetic_dividends(tickers)
+    risk_free_rate = pd.Series(0.02, index=prices.index)
+
+    daily_returns, rebalance_log = backtest.run_backtest(
+        prices,
+        dividends,
+        tickers=tickers,
+        benchmark_ticker="BENCH",
+        start=pd.Timestamp("2018-01-01"),
+        end=pd.Timestamp("2018-04-30"),
+        risk_free_rate=risk_free_rate,
+    )
+
+    assert len(rebalance_log) > 0
+    assert not daily_returns.isna().any(axis=None)
+
+
 def test_risk_parity_optimiser_works_end_to_end_in_the_walk_forward_loop():
     prices = _synthetic_universe(n_tickers=8)
     tickers = [c for c in prices.columns if c != "BENCH"]

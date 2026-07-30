@@ -101,3 +101,15 @@ def test_risk_parity_weights_sum_to_one_and_respect_bounds():
 
     assert sum(weights.values()) == pytest.approx(1.0, abs=1e-6)
     assert all(0 <= weight <= config.MAX_WEIGHT_PER_STOCK + 1e-9 for weight in weights.values())
+
+
+def test_risk_parity_ignores_risk_free_rate():
+    # ERC doesn't reference expected returns at all - risk_free_rate is only
+    # accepted so this function matches max_sharpe_weights' call signature
+    # for backtest.py's pluggable optimiser_fn contract, so passing one
+    # must not change the result.
+    prices = _synthetic_prices(n_tickers=12)
+    without_rate = optimise.risk_parity_weights(prices)
+    with_rate = optimise.risk_parity_weights(prices, risk_free_rate=0.05)
+
+    assert with_rate == without_rate
