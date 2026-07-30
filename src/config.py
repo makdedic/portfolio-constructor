@@ -7,9 +7,13 @@ from datetime import date, timedelta
 from pathlib import Path
 
 # --- Ticker universe -------------------------------------------------------
-# First use a subset of the S&P 500 instead of the full ~500 names.
-# This keeps yfinance calls fast before we get the whole pipeline connected end to end.
-# Swap TICKER_UNIVERSE for a full S&P 500 list later — nothing downstream needs to change.
+# Kept as the default (rather than the full S&P 500) for two reasons: dev/
+# notebook iteration speed and Streamlit dashboard responsiveness both stay
+# fast, and config.py must never require network I/O at import time (nearly
+# every module transitively imports it) — a live-fetched S&P 500 list can't
+# live at module scope regardless of which universe is "default". The full
+# list is available via ingest.load_or_fetch_sp500_tickers(), used explicitly
+# (e.g. run_backtest(..., tickers=sp500_tickers)) where it's actually wanted.
 DEV_TICKERS = [
     "AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA",       # tech
     "JPM", "BAC", "WFC", "GS",                                     # financials
@@ -77,6 +81,9 @@ TRADING_DAYS_PER_YEAR = 252
 # RISK_FREE_RATE_FRED_SERIES and src/data/ingest.py.
 RISK_FREE_RATE_ANNUAL = 0.02
 RISK_FREE_RATE_FRED_SERIES = "DTB3"  # 3-month T-bill, secondary market rate
+
+# --- S&P 500 universe (full, optional) ----------------------------------------
+SP500_WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 
 # --- LightGBM ranker -------------------------------------------------------
 # The training panel is only ~1,000-1,300 rows (~39 tickers x ~30 monthly

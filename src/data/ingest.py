@@ -5,10 +5,12 @@ rather than yfinance's default wide MultiIndex — long format is trivial to
 filter, inspect, and reason about column by column.
 """
 
+import io
 import os
 from datetime import date
 
 import pandas as pd
+import requests
 import yfinance as yf
 from pandas_datareader import data as pdr
 
@@ -104,3 +106,49 @@ def load_or_fetch_risk_free_rate(start: date, end: date) -> pd.DataFrame:
     os.makedirs(config.CACHE_DIR, exist_ok=True)
     rate.to_parquet(path)
     return rate
+
+
+def fetch_sp500_tickers() -> list[str]:
+    """Current S&P 500 constituent tickers, scraped from Wikipedia.
+
+    Wikipedia uses "." for share classes (e.g. "BRK.B"); yfinance expects
+    "-" (e.g. "BRK-B") - normalised here. match="Symbol" targets the
+    constituent table by its header rather than a positional index, since
+    Wikipedia's table ordering on this page has changed before.
+
+    A plain pd.read_html(url) call gets a 403 from Wikipedia - its default
+    request has no User-Agent header, which Wikipedia blocks as bot-like -
+    so the page is fetched directly first with one set.
+    """
+    response = requests.get(config.SP500_WIKIPEDIA_URL, headers={"User-Agent": "Mozilla/5.0"})
+    response.raise_for_status()
+    tables = pd.read_html(io.StringIO(response.text), match="Symbol")
+    tickers = tables[0]["Symbol"].str.replace(".", "-", regex=False)
+    return sorted(tickers.tolist())
+
+
+def load_or_fetch_sp500_tickers() -> list[str]:
+    """Read cached constituent list if present, otherwise fetch and cache it.
+
+    Cached (not re-scraped every run) so a given backtest's universe stays
+    stable and reproducible even if Wikipedia's page changes later.
+    """
+    path = os.path.join(config.CACHE_DIR, "sp500_tickers.parquet")
+    if os.path.exists(path):
+        return pd.read_parquet(path)["ticker"].tolist()
+    tickers = fetch_sp500_tickers()
+    os.makedirs(config.CACHE_DIR, exist_ok=True)
+    pd.DataFrame({"ticker": tickers}).to_parquet(path)
+    return tickers
+
+
+def tickers_with_complete_history(wide_prices: pd.DataFrame) -> list[str]:
+    """Tickers with no missing price anywhere in wide_prices' date range.
+
+    Applied once, up front, when building a large/loosely-curated universe
+    (the full S&P 500) rather than a hand-picked one: a recently-added
+    constituent without this much history is excluded from the whole
+    backtest, rather than requiring every downstream factor/ranking
+    function to handle partial history individually.
+    """
+    return wide_prices.columns[wide_prices.notna().all()].tolist()
