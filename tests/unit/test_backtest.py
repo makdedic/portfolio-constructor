@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from src.models import lgbm_ranker
-from src.portfolio import backtest
+from src.portfolio import backtest, optimise
 
 
 def _synthetic_universe(n_tickers: int = 5) -> pd.DataFrame:
@@ -146,6 +146,25 @@ def test_lgbm_ranker_works_end_to_end_in_the_walk_forward_loop():
         start=pd.Timestamp("2018-01-01"),
         end=pd.Timestamp("2018-04-30"),
         rank_fn=lgbm_ranker.rank_by_lgbm,
+    )
+
+    assert len(rebalance_log) > 0
+    assert not daily_returns.isna().any(axis=None)
+
+
+def test_risk_parity_optimiser_works_end_to_end_in_the_walk_forward_loop():
+    prices = _synthetic_universe(n_tickers=8)
+    tickers = [c for c in prices.columns if c != "BENCH"]
+    dividends = _synthetic_dividends(tickers)
+
+    daily_returns, rebalance_log = backtest.run_backtest(
+        prices,
+        dividends,
+        tickers=tickers,
+        benchmark_ticker="BENCH",
+        start=pd.Timestamp("2018-01-01"),
+        end=pd.Timestamp("2018-04-30"),
+        optimiser_fn=optimise.risk_parity_weights,
     )
 
     assert len(rebalance_log) > 0
