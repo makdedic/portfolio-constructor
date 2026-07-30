@@ -11,20 +11,37 @@ import pandas as pd
 from src import config
 
 
+def _daily_excess_returns(
+    daily_returns: pd.Series,
+    risk_free_rate_annual: float | pd.Series,
+    periods_per_year: int,
+) -> pd.Series:
+    """Subtracts the risk-free rate from daily returns.
+
+    risk_free_rate_annual can be a flat rate (the historical default) or a
+    date-indexed Series of actual rates (e.g. from FRED) — reindexed and
+    forward-filled onto daily_returns' own dates first, so a real rate that
+    only has values on business days still lines up with every trading day.
+    """
+    if isinstance(risk_free_rate_annual, pd.Series):
+        risk_free_rate_annual = risk_free_rate_annual.reindex(daily_returns.index).ffill()
+    daily_risk_free_rate = risk_free_rate_annual / periods_per_year
+    return daily_returns - daily_risk_free_rate
+
+
 def sharpe_ratio(
     daily_returns: pd.Series,
-    risk_free_rate_annual: float = config.RISK_FREE_RATE_ANNUAL,
+    risk_free_rate_annual: float | pd.Series = config.RISK_FREE_RATE_ANNUAL,
     periods_per_year: int = config.TRADING_DAYS_PER_YEAR,
 ) -> float:
     """Annualised return per unit of total volatility, in excess of the risk-free rate."""
-    daily_risk_free_rate = risk_free_rate_annual / periods_per_year
-    excess_returns = daily_returns - daily_risk_free_rate
+    excess_returns = _daily_excess_returns(daily_returns, risk_free_rate_annual, periods_per_year)
     return (excess_returns.mean() / excess_returns.std()) * np.sqrt(periods_per_year)
 
 
 def sortino_ratio(
     daily_returns: pd.Series,
-    risk_free_rate_annual: float = config.RISK_FREE_RATE_ANNUAL,
+    risk_free_rate_annual: float | pd.Series = config.RISK_FREE_RATE_ANNUAL,
     periods_per_year: int = config.TRADING_DAYS_PER_YEAR,
 ) -> float:
     """Like Sharpe, but only penalises downside volatility.
@@ -33,8 +50,7 @@ def sortino_ratio(
     the denominator only uses the standard deviation of negative excess
     returns.
     """
-    daily_risk_free_rate = risk_free_rate_annual / periods_per_year
-    excess_returns = daily_returns - daily_risk_free_rate
+    excess_returns = _daily_excess_returns(daily_returns, risk_free_rate_annual, periods_per_year)
     downside_returns = excess_returns[excess_returns < 0]
     downside_deviation = downside_returns.std()
     return (excess_returns.mean() / downside_deviation) * np.sqrt(periods_per_year)
@@ -101,11 +117,14 @@ def var_breaches(daily_returns: pd.Series, confidence: float) -> int:
     return int((daily_returns < var_threshold).sum())
 
 
-def compute_all(daily_returns: pd.Series) -> dict[str, float]:
+def compute_all(
+    daily_returns: pd.Series,
+    risk_free_rate_annual: float | pd.Series = config.RISK_FREE_RATE_ANNUAL,
+) -> dict[str, float]:
     """Every risk metric this project reports, keyed by name."""
     metrics = {
-        "sharpe_ratio": sharpe_ratio(daily_returns),
-        "sortino_ratio": sortino_ratio(daily_returns),
+        "sharpe_ratio": sharpe_ratio(daily_returns, risk_free_rate_annual),
+        "sortino_ratio": sortino_ratio(daily_returns, risk_free_rate_annual),
         "max_drawdown": max_drawdown(daily_returns),
     }
     for confidence in config.VAR_CONFIDENCE_LEVELS:

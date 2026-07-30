@@ -31,6 +31,42 @@ def test_sortino_penalises_only_downside_and_exceeds_sharpe_here():
     assert sortino > sharpe
 
 
+def test_sharpe_and_sortino_use_a_time_varying_risk_free_rate():
+    dates = pd.bdate_range("2020-01-01", periods=10)
+    daily_returns = pd.Series(
+        [0.01, -0.01, 0.02, -0.02, 0.01, 0.015, -0.005, 0.02, -0.015, 0.01], index=dates
+    )
+    # Rate jumps from 0% to 10% halfway through - if the per-day rate isn't
+    # actually being subtracted day by day, this wouldn't match a manual
+    # calculation that does use the real per-day value.
+    risk_free_rate = pd.Series([0.0] * 5 + [0.10] * 5, index=dates)
+    expected_excess = daily_returns - (risk_free_rate / 252)
+
+    expected_sharpe = (expected_excess.mean() / expected_excess.std()) * np.sqrt(252)
+    sharpe = metrics.sharpe_ratio(daily_returns, risk_free_rate_annual=risk_free_rate, periods_per_year=252)
+    assert sharpe == pytest.approx(expected_sharpe)
+
+    downside = expected_excess[expected_excess < 0]
+    expected_sortino = (expected_excess.mean() / downside.std()) * np.sqrt(252)
+    sortino = metrics.sortino_ratio(daily_returns, risk_free_rate_annual=risk_free_rate, periods_per_year=252)
+    assert sortino == pytest.approx(expected_sortino)
+
+
+def test_time_varying_risk_free_rate_is_forward_filled_onto_return_dates():
+    dates = pd.bdate_range("2020-01-01", periods=6)
+    daily_returns = pd.Series([0.01, -0.01, 0.02, -0.02, 0.01, 0.015], index=dates)
+    # Sparse rate series, e.g. FRED's own publishing gaps - only has a
+    # value on the first and fourth day of the return series.
+    sparse_rate = pd.Series([0.02, 0.06], index=[dates[0], dates[3]])
+
+    filled_rate = sparse_rate.reindex(dates).ffill()
+    expected_excess = daily_returns - (filled_rate / 252)
+    expected_sharpe = (expected_excess.mean() / expected_excess.std()) * np.sqrt(252)
+
+    sharpe = metrics.sharpe_ratio(daily_returns, risk_free_rate_annual=sparse_rate, periods_per_year=252)
+    assert sharpe == pytest.approx(expected_sharpe)
+
+
 def test_max_drawdown_known_series():
     # Cumulative value: 1.10, 0.88, 0.924, 1.0164 — the worst drop from the
     # running peak of 1.10 is at the second point: (0.88 - 1.10) / 1.10 = -0.2.
