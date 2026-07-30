@@ -9,3 +9,4 @@ pytest
 jupyterlab
 matplotlib
 lightgbm
+cvxpy
