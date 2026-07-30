@@ -9,6 +9,7 @@ backtests work.
 """
 
 import pandas as pd
+from pypfopt import exceptions as pypfopt_exceptions
 
 from src import config
 from src.data import features
@@ -71,7 +72,16 @@ def _select_target_weights(
 
     training_window = features.training_window(universe_prices, as_of_date)
     rate = config.RISK_FREE_RATE_ANNUAL if risk_free_rate is None else risk_free_rate.asof(as_of_date)
-    return optimiser_fn(training_window[list(top_holdings)], risk_free_rate=rate)
+    try:
+        return optimiser_fn(training_window[list(top_holdings)], risk_free_rate=rate)
+    except pypfopt_exceptions.OptimizationError:
+        # max_sharpe_weights can become numerically infeasible during
+        # extreme market stress - verified against the 2020-03-31 COVID-
+        # crash rebalance, where trailing 3-year expected returns for the
+        # selected holdings ranged from -56% to +16%. Equal-weight the same
+        # holdings for this one rebalance rather than halting the whole
+        # walk-forward backtest.
+        return {ticker: 1 / len(top_holdings) for ticker in top_holdings}
 
 
 def _run_rebalanced_series(

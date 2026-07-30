@@ -6,6 +6,7 @@ tested in test_features.py alongside features.training_window.)
 import numpy as np
 import pandas as pd
 import pytest
+from pypfopt import exceptions as pypfopt_exceptions
 
 from src.models import lgbm_ranker
 from src.portfolio import backtest, optimise
@@ -150,6 +151,27 @@ def test_lgbm_ranker_works_end_to_end_in_the_walk_forward_loop():
 
     assert len(rebalance_log) > 0
     assert not daily_returns.isna().any(axis=None)
+
+
+def test_select_target_weights_falls_back_to_equal_weight_on_optimiser_failure():
+    # max_sharpe_weights can raise pypfopt's OptimizationError under extreme
+    # market stress (verified against a real 2020-03-31 COVID-crash
+    # rebalance) - the walk-forward loop must survive that, not crash the
+    # whole backtest over one bad rebalance.
+    prices = _synthetic_universe(n_tickers=8)
+    tickers = [c for c in prices.columns if c != "BENCH"]
+    dividends = _synthetic_dividends(tickers)
+
+    def failing_optimiser(prices, risk_free_rate):
+        raise pypfopt_exceptions.OptimizationError("infeasible")
+
+    weights = backtest._select_target_weights(
+        prices[tickers], dividends, pd.Timestamp("2018-01-31"), optimiser_fn=failing_optimiser
+    )
+
+    assert sum(weights.values()) == pytest.approx(1.0)
+    assert len(weights) == len(tickers)  # every candidate ticker still gets a (equal) weight
+    assert len(set(weights.values())) == 1  # every weight is identical
 
 
 def test_select_target_weights_looks_up_the_risk_free_rate_as_of_the_rebalance_date():
