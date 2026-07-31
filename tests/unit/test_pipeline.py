@@ -1,8 +1,8 @@
 """Guards the pipeline's orchestration/composition, not the underlying
-logic - ingest/backtest/metrics already have their own tests (39 of them).
-This checks that run_pipeline wires those pieces together correctly: right
-arguments reaching the right calls, cache_name actually threading through,
-and retries configured on the tasks that need them.
+logic - ingest/backtest/metrics already have their own tests. This checks
+that run_pipeline wires those pieces together correctly: right arguments
+reaching the right calls, and retries configured on the tasks that need
+them.
 """
 
 from unittest.mock import patch
@@ -23,7 +23,7 @@ def _fake_daily_returns() -> pd.DataFrame:
     )
 
 
-def test_run_pipeline_threads_cache_names_to_the_right_fetch_calls():
+def test_run_pipeline_routes_the_right_tickers_to_the_right_fetch_calls():
     with (
         patch("src.data.pipeline.ingest.load_or_fetch_prices") as fetch_prices_mock,
         patch("src.data.pipeline.ingest.load_or_fetch_dividends") as fetch_dividends_mock,
@@ -37,19 +37,12 @@ def test_run_pipeline_threads_cache_names_to_the_right_fetch_calls():
         run_backtest_mock.return_value = (_fake_daily_returns(), pd.DataFrame())
         compute_all_mock.return_value = {"sharpe_ratio": 1.0}
 
-        pipeline.run_pipeline(
-            tickers=["AAPL", "MSFT"],
-            benchmark_ticker="SPY",
-            prices_cache_name="prices_test",
-            dividends_cache_name="dividends_test",
-        )
+        pipeline.run_pipeline(tickers=["AAPL", "MSFT"], benchmark_ticker="SPY")
 
         prices_call = fetch_prices_mock.call_args
-        assert prices_call.kwargs["cache_name"] == "prices_test"
         assert set(prices_call.args[0]) == {"AAPL", "MSFT", "SPY"}  # benchmark included in the price fetch
 
         dividends_call = fetch_dividends_mock.call_args
-        assert dividends_call.kwargs["cache_name"] == "dividends_test"
         assert dividends_call.args[0] == ["AAPL", "MSFT"]  # benchmark excluded from the dividend fetch
 
 

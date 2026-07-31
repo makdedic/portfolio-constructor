@@ -19,17 +19,17 @@ from src.risk import metrics
 
 
 @task(retries=config.PREFECT_TASK_RETRIES, retry_delay_seconds=config.PREFECT_RETRY_DELAY_SECONDS)
-def fetch_prices_task(tickers: list[str], start, end, cache_name: str) -> pd.DataFrame:
+def fetch_prices_task(tickers: list[str], start, end) -> pd.DataFrame:
     """Retried: the most network-dependent, failure-prone step (yfinance)."""
-    prices = ingest.load_or_fetch_prices(tickers, start, end, cache_name=cache_name)
+    prices = ingest.load_or_fetch_prices(tickers, start, end)
     get_run_logger().info(f"fetched prices for {len(tickers)} tickers ({len(prices)} rows)")
     return prices
 
 
 @task(retries=config.PREFECT_TASK_RETRIES, retry_delay_seconds=config.PREFECT_RETRY_DELAY_SECONDS)
-def fetch_dividends_task(tickers: list[str], start, end, cache_name: str) -> pd.DataFrame:
+def fetch_dividends_task(tickers: list[str], start, end) -> pd.DataFrame:
     """Retried, same reason as fetch_prices_task."""
-    dividends = ingest.load_or_fetch_dividends(tickers, start, end, cache_name=cache_name)
+    dividends = ingest.load_or_fetch_dividends(tickers, start, end)
     get_run_logger().info(f"fetched dividends for {len(tickers)} tickers ({len(dividends)} payments)")
     return dividends
 
@@ -74,16 +74,8 @@ def run_pipeline(
     benchmark_ticker: str = config.BENCHMARK_TICKER,
     start: date = config.BACKTEST_START_DATE,
     end: date = config.BACKTEST_END_DATE,
-    prices_cache_name: str = "prices",
-    dividends_cache_name: str = "dividends",
 ) -> dict:
     """Ingest, run the walk-forward backtest, then compute risk metrics.
-
-    prices_cache_name/dividends_cache_name distinguish runs against
-    different universes (e.g. the dev ticker subset vs. the full S&P 500,
-    see ingest.load_or_fetch_prices) so they don't clobber or misread each
-    other's cache file — pass distinct names whenever tickers isn't
-    config.TICKER_UNIVERSE.
 
     Returns a dict with the ingested prices/dividends, the backtest's
     daily_returns and rebalance_log, and a risk-metrics comparison table
@@ -91,15 +83,13 @@ def run_pipeline(
     — everything app.py needs to render, in one call.
 
     The two fetches are independent of each other, so they're submitted to
-    run concurrently rather than one after another.
+    run concurrently rather than one after another. Different ticker sets
+    (e.g. the dev universe vs. the full S&P 500) share cached data via
+    src.data.storage rather than needing separate caches.
     """
     all_tickers = tickers + [benchmark_ticker]
-    prices_future = fetch_prices_task.submit(
-        all_tickers, config.DATA_START_DATE, config.DATA_END_DATE, prices_cache_name
-    )
-    dividends_future = fetch_dividends_task.submit(
-        tickers, config.DATA_START_DATE, config.DATA_END_DATE, dividends_cache_name
-    )
+    prices_future = fetch_prices_task.submit(all_tickers, config.DATA_START_DATE, config.DATA_END_DATE)
+    dividends_future = fetch_dividends_task.submit(tickers, config.DATA_START_DATE, config.DATA_END_DATE)
 
     prices_long = prices_future.result()
     dividends = dividends_future.result()
