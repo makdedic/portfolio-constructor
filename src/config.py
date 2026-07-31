@@ -85,6 +85,10 @@ RISK_FREE_RATE_FRED_SERIES = "DTB3"  # 3-month T-bill, secondary market rate
 # --- S&P 500 universe (full, optional) ----------------------------------------
 SP500_WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 
+# --- Orchestration (Prefect) --------------------------------------------------
+PREFECT_TASK_RETRIES = 2
+PREFECT_RETRY_DELAY_SECONDS = 10
+
 # --- LightGBM ranker -------------------------------------------------------
 # The training panel is only ~1,000-1,300 rows (~39 tickers x ~30 monthly
 # snapshots), so these stay conservative to avoid overfitting. LightGBM's
