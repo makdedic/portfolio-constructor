@@ -1,13 +1,13 @@
 """Guards the S&P 500 constituent sourcing: ticker normalisation for
-yfinance compatibility, and the cache-hit/cache-miss pattern shared with
-every other load_or_fetch_X function in ingest.py.
+yfinance compatibility, and that load_or_fetch_X correctly delegates
+caching to src.data.storage (DuckDB) rather than duplicating that logic.
 """
 
 from unittest.mock import patch
 
 import pandas as pd
 
-from src.data import ingest
+from src.data import ingest, storage
 
 
 def _fake_wikipedia_response(tickers: list[str]) -> str:
@@ -35,56 +35,66 @@ def test_fetch_sp500_tickers_normalises_share_classes_for_yfinance():
 
 
 def test_load_or_fetch_sp500_tickers_uses_cache_when_present(tmp_path):
-    cached_tickers = ["AAPL", "MSFT", "GOOGL"]
-    cache_path = tmp_path / "sp500_tickers.parquet"
-    pd.DataFrame({"ticker": cached_tickers}).to_parquet(cache_path)
+    db_path = tmp_path / "test.duckdb"
+    conn = storage.get_connection(db_path)
+    storage.replace_sp500_tickers(conn, ["AAPL", "MSFT", "GOOGL"])
+    conn.close()
 
-    with patch("src.data.ingest.config.CACHE_DIR", str(tmp_path)):
+    with patch("src.data.storage.config.DUCKDB_PATH", db_path):
         with patch("src.data.ingest.fetch_sp500_tickers") as fetch_mock:
             result = ingest.load_or_fetch_sp500_tickers()
 
-    assert result == cached_tickers
+    assert result == ["AAPL", "GOOGL", "MSFT"]  # sp500_tickers_cached returns them sorted
     fetch_mock.assert_not_called()
 
 
 def test_load_or_fetch_sp500_tickers_fetches_and_caches_when_missing(tmp_path):
+    db_path = tmp_path / "test.duckdb"
     fetched_tickers = ["AAPL", "MSFT", "GOOGL"]
 
-    with patch("src.data.ingest.config.CACHE_DIR", str(tmp_path)):
+    with patch("src.data.storage.config.DUCKDB_PATH", db_path):
         with patch("src.data.ingest.fetch_sp500_tickers", return_value=fetched_tickers) as fetch_mock:
             result = ingest.load_or_fetch_sp500_tickers()
 
     assert result == fetched_tickers
     fetch_mock.assert_called_once()
-    assert (tmp_path / "sp500_tickers.parquet").exists()
+
+    conn = storage.get_connection(db_path)
+    assert storage.sp500_tickers_cached(conn) == sorted(fetched_tickers)
+    conn.close()
 
 
-def test_load_or_fetch_prices_with_distinct_cache_names_do_not_clobber_each_other(tmp_path):
-    dev_prices = pd.DataFrame({"date": ["2020-01-01"], "ticker": ["AAPL"], "adj_close": [100.0]})
-    sp500_prices = pd.DataFrame(
-        {"date": ["2020-01-01"] * 2, "ticker": ["AAPL", "MSFT"], "adj_close": [100.0, 200.0]}
+def test_load_or_fetch_prices_shares_cached_data_across_overlapping_ticker_sets(tmp_path):
+    """The real payoff DuckDB storage exists for, replacing the old
+    cache_name stopgap entirely: a request that overlaps an earlier one
+    only fetches the genuinely new tickers, not the whole set again.
+    """
+    db_path = tmp_path / "test.duckdb"
+    aapl_row = pd.DataFrame(
+        {
+            "date": ["2020-01-01"],
+            "ticker": ["AAPL"],
+            "open": [1.0],
+            "high": [1.0],
+            "low": [1.0],
+            "close": [1.0],
+            "adj_close": [100.0],
+            "volume": [1000.0],
+        }
     )
+    msft_row = aapl_row.assign(ticker="MSFT", adj_close=200.0)
 
-    with patch("src.data.ingest.config.CACHE_DIR", str(tmp_path)):
-        with patch("src.data.ingest.fetch_price_history", side_effect=[dev_prices, sp500_prices]):
-            dev_result = ingest.load_or_fetch_prices(["AAPL"], "2020-01-01", "2020-01-01", cache_name="prices_dev")
-            sp500_result = ingest.load_or_fetch_prices(
-                ["AAPL", "MSFT"], "2020-01-01", "2020-01-01", cache_name="prices_sp500"
-            )
+    with patch("src.data.storage.config.DUCKDB_PATH", db_path):
+        with patch("src.data.ingest.fetch_price_history", return_value=aapl_row) as fetch_mock:
+            first_result = ingest.load_or_fetch_prices(["AAPL"], "2020-01-01", "2020-01-01")
+        fetch_mock.assert_called_once_with(["AAPL"], "2020-01-01", "2020-01-01")
 
-        # Re-reading each by its own cache_name must return what was cached
-        # under that name, not the other run's data.
-        with patch("src.data.ingest.fetch_price_history") as fetch_mock:
-            dev_reread = ingest.load_or_fetch_prices(["AAPL"], "2020-01-01", "2020-01-01", cache_name="prices_dev")
-            sp500_reread = ingest.load_or_fetch_prices(
-                ["AAPL", "MSFT"], "2020-01-01", "2020-01-01", cache_name="prices_sp500"
-            )
+        with patch("src.data.ingest.fetch_price_history", return_value=msft_row) as fetch_mock:
+            second_result = ingest.load_or_fetch_prices(["AAPL", "MSFT"], "2020-01-01", "2020-01-01")
+        fetch_mock.assert_called_once_with(["MSFT"], "2020-01-01", "2020-01-01")
 
-    fetch_mock.assert_not_called()
-    assert len(dev_result) == 1 and len(dev_reread) == 1
-    assert len(sp500_result) == 2 and len(sp500_reread) == 2
-    assert (tmp_path / "prices_dev.parquet").exists()
-    assert (tmp_path / "prices_sp500.parquet").exists()
+    assert len(first_result) == 1
+    assert set(second_result["ticker"]) == {"AAPL", "MSFT"}
 
 
 def test_tickers_with_complete_history_excludes_only_incomplete_tickers():

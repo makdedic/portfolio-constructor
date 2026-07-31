@@ -28,7 +28,7 @@ universe rather than the full S&P 500, so the whole system is fast and
 reliable to run while it's still being built out:
 
 - **Ingestion** (`src/data/ingest.py`) — daily prices + dividends via
-  yfinance, cached locally as Parquet
+  yfinance, cached locally in DuckDB
 - **Alpha factors** (`src/data/features.py`) — 12-1 month momentum,
   trailing 12-month volatility, trailing 12-month dividend yield; every
   factor is strictly lookahead-safe (only ever sees data before the date
@@ -115,7 +115,7 @@ portfolio-constructor/
 ├── src/
 │   ├── config.py           # every constant used across the pipeline
 │   ├── data/
-│   │   ├── ingest.py        # yfinance price + dividend ingestion, Parquet cache
+│   │   ├── ingest.py        # yfinance price + dividend ingestion, DuckDB cache
 │   │   ├── features.py      # alpha factors (momentum, low-vol, dividend yield)
 │   │   └── pipeline.py      # ingest -> backtest -> risk metrics, one call
 │   ├── models/
@@ -131,5 +131,5 @@ portfolio-constructor/
 │   ├── 02_sortino_optimisation_experiment.ipynb
 │   └── 03_pass2_exploration.ipynb
 ├── tests/unit/               # fast, offline, synthetic-data tests
-└── data/cache/               # gitignored Parquet cache (created on first run)
+└── data/cache/               # gitignored DuckDB cache (created on first run)
 ```

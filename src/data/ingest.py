@@ -1,12 +1,18 @@
-"""Pulls daily price and dividend history from yfinance.
+"""Pulls daily price and dividend history from yfinance (plus FRED and a
+Wikipedia scrape for the risk-free rate and S&P 500 constituents).
 
-Both functions return tidy "long" DataFrames (one row per date-ticker pair)
-rather than yfinance's default wide MultiIndex — long format is trivial to
-filter, inspect, and reason about column by column.
+fetch_X functions hit the external source directly, with no caching
+awareness. load_or_fetch_X functions cache via src.data.storage (DuckDB) —
+only fetching tickers storage doesn't already have covered for the
+requested range, so overlapping requests (e.g. the dev ticker subset and
+the full S&P 500) share cached data instead of needing separate caches.
+
+Price/dividend functions return tidy "long" DataFrames (one row per
+date-ticker pair) rather than yfinance's default wide MultiIndex — long
+format is trivial to filter, inspect, and reason about column by column.
 """
 
 import io
-import os
 from datetime import date
 
 import pandas as pd
@@ -15,6 +21,7 @@ import yfinance as yf
 from pandas_datareader import data as pdr
 
 from src import config
+from src.data import storage
 
 
 def fetch_price_history(tickers: list[str], start: date, end: date) -> pd.DataFrame:
@@ -56,40 +63,32 @@ def to_wide_adj_close(price_long: pd.DataFrame) -> pd.DataFrame:
     return price_long.pivot(index="date", columns="ticker", values="adj_close")
 
 
-def load_or_fetch_prices(
-    tickers: list[str], start: date, end: date, cache_name: str = "prices"
-) -> pd.DataFrame:
-    """Read cached price history if present, otherwise fetch and cache it.
-
-    cache_name distinguishes runs against different universes (e.g. the dev
-    ticker subset vs. the full S&P 500) so they don't clobber or misread
-    each other's cache file — pass a distinct name whenever tickers isn't
-    config.TICKER_UNIVERSE.
+def load_or_fetch_prices(tickers: list[str], start: date, end: date) -> pd.DataFrame:
+    """Read cached price history for tickers not already covered in storage
+    for [start, end], fetch only what's missing, then return the full
+    requested set from storage.
     """
-    path = os.path.join(config.CACHE_DIR, f"{cache_name}.parquet")
-    if os.path.exists(path):
-        return pd.read_parquet(path)
-    prices = fetch_price_history(tickers, start, end)
-    os.makedirs(config.CACHE_DIR, exist_ok=True)
-    prices.to_parquet(path)
-    return prices
+    conn = storage.get_connection()
+    missing = storage.tickers_needing_fetch(conn, "prices", tickers, start, end)
+    if missing:
+        fetched = fetch_price_history(missing, start, end)
+        storage.upsert_prices(conn, fetched)
+        storage.log_fetch(conn, "prices", missing, start, end)
+    return storage.query_prices(conn, tickers, start, end)
 
 
-def load_or_fetch_dividends(
-    tickers: list[str], start: date, end: date, cache_name: str = "dividends"
-) -> pd.DataFrame:
-    """Read cached dividend history if present, otherwise fetch and cache it.
-
-    cache_name distinguishes runs against different universes, same as
-    load_or_fetch_prices.
+def load_or_fetch_dividends(tickers: list[str], start: date, end: date) -> pd.DataFrame:
+    """Read cached dividend history for tickers not already covered in
+    storage for [start, end], fetch only what's missing, then return the
+    full requested set from storage.
     """
-    path = os.path.join(config.CACHE_DIR, f"{cache_name}.parquet")
-    if os.path.exists(path):
-        return pd.read_parquet(path)
-    dividends = fetch_dividends(tickers, start, end)
-    os.makedirs(config.CACHE_DIR, exist_ok=True)
-    dividends.to_parquet(path)
-    return dividends
+    conn = storage.get_connection()
+    missing = storage.tickers_needing_fetch(conn, "dividends", tickers, start, end)
+    if missing:
+        fetched = fetch_dividends(missing, start, end)
+        storage.upsert_dividends(conn, fetched)
+        storage.log_fetch(conn, "dividends", missing, start, end)
+    return storage.query_dividends(conn, tickers, start, end)
 
 
 def fetch_risk_free_rate(start: date, end: date) -> pd.DataFrame:
@@ -106,14 +105,15 @@ def fetch_risk_free_rate(start: date, end: date) -> pd.DataFrame:
 
 
 def load_or_fetch_risk_free_rate(start: date, end: date) -> pd.DataFrame:
-    """Read cached risk-free rate history if present, otherwise fetch and cache it."""
-    path = os.path.join(config.CACHE_DIR, "risk_free_rate.parquet")
-    if os.path.exists(path):
-        return pd.read_parquet(path)
-    rate = fetch_risk_free_rate(start, end)
-    os.makedirs(config.CACHE_DIR, exist_ok=True)
-    rate.to_parquet(path)
-    return rate
+    """Read the cached risk-free rate for [start, end] if already covered,
+    otherwise fetch and cache it.
+    """
+    conn = storage.get_connection()
+    if not storage.risk_free_rate_covered(conn, start, end):
+        rate = fetch_risk_free_rate(start, end)
+        storage.upsert_risk_free_rate(conn, rate)
+        storage.log_fetch(conn, "risk_free_rate", [storage.NO_TICKER], start, end)
+    return storage.query_risk_free_rate(conn, start, end)
 
 
 def fetch_sp500_tickers() -> list[str]:
@@ -141,12 +141,12 @@ def load_or_fetch_sp500_tickers() -> list[str]:
     Cached (not re-scraped every run) so a given backtest's universe stays
     stable and reproducible even if Wikipedia's page changes later.
     """
-    path = os.path.join(config.CACHE_DIR, "sp500_tickers.parquet")
-    if os.path.exists(path):
-        return pd.read_parquet(path)["ticker"].tolist()
+    conn = storage.get_connection()
+    cached = storage.sp500_tickers_cached(conn)
+    if cached:
+        return cached
     tickers = fetch_sp500_tickers()
-    os.makedirs(config.CACHE_DIR, exist_ok=True)
-    pd.DataFrame({"ticker": tickers}).to_parquet(path)
+    storage.replace_sp500_tickers(conn, tickers)
     return tickers
 
 
