@@ -1,0 +1,120 @@
+"""Guards the DuckDB storage layer's coverage semantics (tickers_needing_
+fetch, log_fetch, upsert, query) independent of where data actually comes
+from - ingest.py's integration with this layer (mocking the real network
+calls) is tested separately in test_ingest.py.
+
+Uses a tmp_path-based file, not ":memory:" - get_connection() opens fresh
+per call by design (see its docstring), and DuckDB's in-memory databases
+don't persist across separate connect() calls, so ":memory:" would
+silently break any test that calls storage functions more than once.
+"""
+
+from datetime import date
+
+import pandas as pd
+import pytest
+
+from src.data import storage
+
+
+@pytest.fixture
+def conn(tmp_path):
+    connection = storage.get_connection(tmp_path / "test.duckdb")
+    yield connection
+    connection.close()
+
+
+def _prices_df(ticker: str, dates: list[date]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "date": dates,
+            "ticker": [ticker] * len(dates),
+            "open": [1.0] * len(dates),
+            "high": [1.0] * len(dates),
+            "low": [1.0] * len(dates),
+            "close": [1.0] * len(dates),
+            "adj_close": [1.0] * len(dates),
+            "volume": [100.0] * len(dates),
+        }
+    )
+
+
+def test_tickers_needing_fetch_returns_only_the_uncovered_subset(conn):
+    storage.log_fetch(conn, "prices", ["AAPL"], date(2020, 1, 1), date(2020, 12, 31))
+
+    missing = storage.tickers_needing_fetch(conn, "prices", ["AAPL", "MSFT"], date(2020, 1, 1), date(2020, 12, 31))
+
+    assert missing == ["MSFT"]
+
+
+def test_incremental_ticker_coverage_across_two_requests(conn):
+    # First request: A and B are both missing.
+    first_missing = storage.tickers_needing_fetch(conn, "prices", ["A", "B"], date(2020, 1, 1), date(2020, 1, 31))
+    assert first_missing == ["A", "B"]
+    storage.upsert_prices(
+        conn, pd.concat([_prices_df("A", [date(2020, 1, 15)]), _prices_df("B", [date(2020, 1, 15)])])
+    )
+    storage.log_fetch(conn, "prices", ["A", "B"], date(2020, 1, 1), date(2020, 1, 31))
+
+    # Second request, same range, one new ticker added: only C is missing.
+    second_missing = storage.tickers_needing_fetch(
+        conn, "prices", ["A", "B", "C"], date(2020, 1, 1), date(2020, 1, 31)
+    )
+    assert second_missing == ["C"]
+    storage.upsert_prices(conn, _prices_df("C", [date(2020, 1, 15)]))
+    storage.log_fetch(conn, "prices", ["C"], date(2020, 1, 1), date(2020, 1, 31))
+
+    result = storage.query_prices(conn, ["A", "B", "C"], date(2020, 1, 1), date(2020, 1, 31))
+    assert set(result["ticker"]) == {"A", "B", "C"}
+
+
+def test_zero_row_result_still_counts_as_covered(conn):
+    # A ticker that legitimately paid zero dividends: the upsert is empty,
+    # but the fetch must still be logged as covered - otherwise it would
+    # look "never fetched" and refetch forever.
+    empty_dividends = pd.DataFrame(columns=["date", "ticker", "dividend_amount"])
+    storage.upsert_dividends(conn, empty_dividends)
+    storage.log_fetch(conn, "dividends", ["GOOGL"], date(2020, 1, 1), date(2020, 12, 31))
+
+    missing = storage.tickers_needing_fetch(conn, "dividends", ["GOOGL"], date(2020, 1, 1), date(2020, 12, 31))
+    assert missing == []
+
+
+def test_duplicate_fetch_and_log_is_idempotent(conn):
+    # Simulates a Prefect retry: the exact same fetch+log happens twice.
+    prices = _prices_df("AAPL", [date(2020, 1, 1), date(2020, 1, 2)])
+    storage.upsert_prices(conn, prices)
+    storage.log_fetch(conn, "prices", ["AAPL"], date(2020, 1, 1), date(2020, 1, 2))
+
+    storage.upsert_prices(conn, prices)
+    storage.log_fetch(conn, "prices", ["AAPL"], date(2020, 1, 1), date(2020, 1, 2))
+
+    assert conn.execute("SELECT COUNT(*) FROM prices").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM fetch_log").fetchone()[0] == 1
+
+
+def test_narrower_logged_range_does_not_cover_a_wider_request(conn):
+    storage.log_fetch(conn, "prices", ["AAPL"], date(2020, 6, 1), date(2020, 6, 30))
+
+    missing = storage.tickers_needing_fetch(conn, "prices", ["AAPL"], date(2020, 1, 1), date(2020, 12, 31))
+
+    assert missing == ["AAPL"]
+
+
+def test_risk_free_rate_coverage_and_round_trip(conn):
+    assert storage.risk_free_rate_covered(conn, date(2020, 1, 1), date(2020, 12, 31)) is False
+
+    storage.log_fetch(conn, "risk_free_rate", [storage.NO_TICKER], date(2020, 1, 1), date(2020, 12, 31))
+    assert storage.risk_free_rate_covered(conn, date(2020, 1, 1), date(2020, 12, 31)) is True
+
+    rate = pd.DataFrame({"date": [date(2020, 1, 1)], "risk_free_rate_annual": [0.02]})
+    storage.upsert_risk_free_rate(conn, rate)
+    result = storage.query_risk_free_rate(conn, date(2020, 1, 1), date(2020, 12, 31))
+    assert result["risk_free_rate_annual"].iloc[0] == pytest.approx(0.02)
+
+
+def test_sp500_tickers_cache_hit_and_miss(conn):
+    assert storage.sp500_tickers_cached(conn) == []
+
+    storage.replace_sp500_tickers(conn, ["AAPL", "MSFT"])
+    assert storage.sp500_tickers_cached(conn) == ["AAPL", "MSFT"]
