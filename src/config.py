@@ -105,3 +105,4 @@ LGBM_MIN_CHILD_SAMPLES = 10
 # notebook happens to be run from.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = PROJECT_ROOT / "data" / "cache"
+DUCKDB_PATH = CACHE_DIR / "portfolio.duckdb"

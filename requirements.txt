@@ -13,3 +13,4 @@ cvxpy
 pandas-datareader
 requests
 prefect
+duckdb
