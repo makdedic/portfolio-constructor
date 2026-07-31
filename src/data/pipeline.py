@@ -10,7 +10,7 @@ around calls to that existing logic.
 from datetime import date
 
 import pandas as pd
-from prefect import flow, task
+from prefect import flow, get_run_logger, task
 
 from src import config
 from src.data import ingest
@@ -21,13 +21,17 @@ from src.risk import metrics
 @task(retries=config.PREFECT_TASK_RETRIES, retry_delay_seconds=config.PREFECT_RETRY_DELAY_SECONDS)
 def fetch_prices_task(tickers: list[str], start, end, cache_name: str) -> pd.DataFrame:
     """Retried: the most network-dependent, failure-prone step (yfinance)."""
-    return ingest.load_or_fetch_prices(tickers, start, end, cache_name=cache_name)
+    prices = ingest.load_or_fetch_prices(tickers, start, end, cache_name=cache_name)
+    get_run_logger().info(f"fetched prices for {len(tickers)} tickers ({len(prices)} rows)")
+    return prices
 
 
 @task(retries=config.PREFECT_TASK_RETRIES, retry_delay_seconds=config.PREFECT_RETRY_DELAY_SECONDS)
 def fetch_dividends_task(tickers: list[str], start, end, cache_name: str) -> pd.DataFrame:
     """Retried, same reason as fetch_prices_task."""
-    return ingest.load_or_fetch_dividends(tickers, start, end, cache_name=cache_name)
+    dividends = ingest.load_or_fetch_dividends(tickers, start, end, cache_name=cache_name)
+    get_run_logger().info(f"fetched dividends for {len(tickers)} tickers ({len(dividends)} payments)")
+    return dividends
 
 
 @task
@@ -43,21 +47,25 @@ def run_backtest_task(
     a flaky call retrying would help. Wrapped for observability: it shows up
     as its own step in Prefect's run history.
     """
-    return backtest.run_backtest(
+    daily_returns, rebalance_log = backtest.run_backtest(
         prices, dividends, tickers=tickers, benchmark_ticker=benchmark_ticker, start=start, end=end
     )
+    get_run_logger().info(f"backtest complete: {len(rebalance_log)} rebalances, {start} to {end}")
+    return daily_returns, rebalance_log
 
 
 @task
 def compute_risk_metrics_task(daily_returns: pd.DataFrame, benchmark_ticker: str) -> pd.DataFrame:
     """No retries, same reason as run_backtest_task."""
-    return pd.DataFrame(
+    risk_comparison = pd.DataFrame(
         {
             "strategy": metrics.compute_all(daily_returns["strategy_net"]),
             "equal_weight": metrics.compute_all(daily_returns["equal_weight_net"]),
             benchmark_ticker: metrics.compute_all(daily_returns["sp500_net"]),
         }
     )
+    get_run_logger().info(f"strategy Sharpe: {risk_comparison.loc['sharpe_ratio', 'strategy']:.3f}")
+    return risk_comparison
 
 
 @flow(name="portfolio-pipeline")
