@@ -32,7 +32,7 @@ TICKER_UNIVERSE = DEV_TICKERS
 BENCHMARK_TICKER = "SPY"
 
 # --- Date ranges -------------------------------------------------------------
-BACKTEST_START_DATE = date(2019, 1, 1)
+BACKTEST_START_DATE = date(2015, 1, 1)
 
 
 def _last_completed_month_end() -> date:
