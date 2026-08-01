@@ -105,15 +105,48 @@ if "results" not in st.session_state:
     st.stop()
 
 results = st.session_state["results"]
+daily_returns = results["daily_returns"]
+rebalance_log = results["rebalance_log"]
 st.caption(f"Showing: {st.session_state['config_caption']}")
 
-rebalance_dates_newest_first = list(results["rebalance_log"].index[::-1])
+
+def _total_and_cagr_pct(returns: pd.Series, n_years: float) -> tuple[float, float]:
+    growth = (1 + returns).cumprod().iloc[-1]
+    return (growth - 1) * 100, (growth ** (1 / n_years) - 1) * 100
+
+
+n_years = (daily_returns.index[-1] - daily_returns.index[0]).days / 365.25
+strategy_total, strategy_cagr = _total_and_cagr_pct(daily_returns["strategy_net"], n_years)
+spy_total, spy_cagr = _total_and_cagr_pct(daily_returns["sp500_net"], n_years)
+gross_growth = (1 + daily_returns["strategy_gross"]).cumprod().iloc[-1]
+net_growth = (1 + daily_returns["strategy_net"]).cumprod().iloc[-1]
+cost_drag_pct = (gross_growth - net_growth) * 100
+avg_turnover_pct = rebalance_log["turnover"].mean() * 100
+
+st.header("Headline performance")
+kpi_cols = st.columns(4)
+kpi_cols[0].metric("Total return", f"{strategy_total:.1f}%", f"{strategy_total - spy_total:+.1f}pp vs SPY")
+kpi_cols[1].metric(
+    "Annualised return (CAGR)", f"{strategy_cagr:.1f}%", f"{strategy_cagr - spy_cagr:+.1f}pp vs SPY"
+)
+kpi_cols[2].metric(
+    "Cost drag",
+    f"-{cost_drag_pct:.1f}pp",
+    help="Total return given up to transaction costs — gross minus net total return.",
+)
+kpi_cols[3].metric(
+    "Avg. turnover / rebalance",
+    f"{avg_turnover_pct:.0f}%",
+    help="Average share of the portfolio traded at each rebalance.",
+)
+
+rebalance_dates_newest_first = list(rebalance_log.index[::-1])
 selected_rebalance_date = st.selectbox(
     "View holdings as of",
     options=rebalance_dates_newest_first,
     format_func=lambda d: d.date().isoformat(),
 )
-selected_weights = results["rebalance_log"]["weights"].loc[selected_rebalance_date]
+selected_weights = rebalance_log["weights"].loc[selected_rebalance_date]
 weights_series = pd.Series(selected_weights).sort_values(ascending=False)
 weights_series = weights_series[weights_series > 0]
 
@@ -124,13 +157,42 @@ with weights_col:
 with table_col:
     st.dataframe(weights_series.rename("weight").to_frame().round(4))
 
+st.header("Most-held positions across the full backtest")
+st.caption(
+    "Sum of weight held at every rebalance — shows what the strategy consistently favours, "
+    "not just its current picks."
+)
+weights_over_time = pd.DataFrame(list(rebalance_log["weights"]), index=rebalance_log.index).fillna(0.0)
+top_holdings = weights_over_time.sum().sort_values(ascending=False).head(15)
+persistent_col, persistent_table_col = st.columns([2, 1])
+with persistent_col:
+    st.bar_chart(top_holdings)
+with persistent_table_col:
+    st.dataframe(top_holdings.rename("total weight").to_frame().round(2))
+
 st.header("Risk metrics: strategy vs. benchmarks")
 st.caption("All metrics computed net of the configured transaction cost.")
 st.dataframe(results["risk_comparison"].round(4))
 
 st.header("Walk-forward backtest: cumulative growth of $1 (net of costs)")
-cumulative_growth = (
-    1 + results["daily_returns"][["strategy_net", "equal_weight_net", "sp500_net"]]
-).cumprod()
+cumulative_growth = (1 + daily_returns[["strategy_net", "equal_weight_net", "sp500_net"]]).cumprod()
 cumulative_growth.columns = ["Strategy", "Equal-weight", "SPY"]
 st.line_chart(cumulative_growth)
+
+st.header("Drawdown over time")
+st.caption("Peak-to-trough decline from the running high — strategy vs. SPY.")
+
+
+def _drawdown_pct(returns: pd.Series) -> pd.Series:
+    cumulative_value = (1 + returns).cumprod()
+    running_peak = cumulative_value.cummax()
+    return (cumulative_value - running_peak) / running_peak * 100
+
+
+drawdown_df = pd.DataFrame(
+    {
+        "Strategy": _drawdown_pct(daily_returns["strategy_net"]),
+        "SPY": _drawdown_pct(daily_returns["sp500_net"]),
+    }
+)
+st.area_chart(drawdown_df)
