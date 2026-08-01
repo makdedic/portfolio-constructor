@@ -194,9 +194,15 @@ def run_backtest(
     risk_free_rate is a date-indexed Series of actual historical rates
     (e.g. from ingest.load_or_fetch_risk_free_rate), or None to fall back
     to the flat config.RISK_FREE_RATE_ANNUAL constant.
+
+    tickers without a complete price history across the whole prices range
+    (too young to exist for the full backtest, e.g. an IPO or spinoff after
+    it starts) are excluded automatically — see features.tickers_with_complete_history.
     """
     start, end = pd.Timestamp(start), pd.Timestamp(end)
     universe_prices = prices[tickers]
+    usable_tickers = features.tickers_with_complete_history(universe_prices)
+    universe_prices = universe_prices[usable_tickers]
     benchmark_prices = prices[benchmark_ticker]
 
     rebalance_dates = get_rebalance_dates(universe_prices, start, end)

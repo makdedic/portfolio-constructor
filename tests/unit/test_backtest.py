@@ -134,6 +134,31 @@ def test_both_benchmarks_present_and_aligned_to_strategy_dates():
     assert daily_returns.notna().all(axis=None)
 
 
+def test_run_backtest_excludes_tickers_without_complete_history_automatically():
+    # Simulates a late IPO/spinoff: one ticker has no price data for its
+    # first ~18 months, unlike every other ticker which spans the full range.
+    prices = _synthetic_universe(n_tickers=8)
+    tickers = [c for c in prices.columns if c != "BENCH"]
+    dividends = _synthetic_dividends(tickers)
+
+    late_ipo_ticker = tickers[0]
+    prices = prices.copy()
+    prices.loc[prices.index < pd.Timestamp("2016-06-30"), late_ipo_ticker] = float("nan")
+
+    daily_returns, rebalance_log = backtest.run_backtest(
+        prices,
+        dividends,
+        tickers=tickers,
+        benchmark_ticker="BENCH",
+        start=pd.Timestamp("2018-01-01"),
+        end=pd.Timestamp("2018-04-30"),
+    )
+
+    assert not daily_returns.isna().any(axis=None)
+    for selected_tickers in rebalance_log["selected_tickers"]:
+        assert late_ipo_ticker not in selected_tickers
+
+
 def test_lgbm_ranker_works_end_to_end_in_the_walk_forward_loop():
     prices = _synthetic_universe_long()
     tickers = [c for c in prices.columns if c != "BENCH"]
