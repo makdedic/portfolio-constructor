@@ -148,15 +148,3 @@ def load_or_fetch_sp500_tickers() -> list[str]:
     tickers = fetch_sp500_tickers()
     storage.replace_sp500_tickers(conn, tickers)
     return tickers
-
-
-def tickers_with_complete_history(wide_prices: pd.DataFrame) -> list[str]:
-    """Tickers with no missing price anywhere in wide_prices' date range.
-
-    Applied once, up front, when building a large/loosely-curated universe
-    (the full S&P 500) rather than a hand-picked one: a recently-added
-    constituent without this much history is excluded from the whole
-    backtest, rather than requiring every downstream factor/ranking
-    function to handle partial history individually.
-    """
-    return wide_prices.columns[wide_prices.notna().all()].tolist()

@@ -87,3 +87,17 @@ def compute_dividend_yield(dividends: pd.DataFrame, prices: pd.DataFrame, as_of_
 
     current_price = _price_on_or_before(_as_of(prices, as_of_date), as_of_ts)
     return trailing_dividends.reindex(current_price.index).fillna(0.0) / current_price
+
+
+def tickers_with_complete_history(wide_prices: pd.DataFrame) -> list[str]:
+    """Tickers with no missing price anywhere in wide_prices' date range.
+
+    Applied once, up front (e.g. by backtest.run_backtest, right after
+    slicing to the requested universe), rather than requiring every
+    downstream factor/ranking function to handle partial history
+    individually: a ticker too young to have this much history (an IPO or
+    spinoff after the range starts) is excluded from the whole backtest,
+    same "drop it entirely" simplification used for the full S&P 500
+    universe.
+    """
+    return wide_prices.columns[wide_prices.notna().all()].tolist()

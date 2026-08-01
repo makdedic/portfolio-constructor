@@ -1,6 +1,8 @@
 """Guards rule 1 (no lookahead bias) and rule 2 (rolling window, never full
 history): a factor computed as of date t must be unchanged by any data
 dated t or later, and training_window must be a fixed-size rolling slice.
+Also guards tickers_with_complete_history, a related but distinct concern:
+which tickers have enough data to be used at all.
 """
 
 import pandas as pd
@@ -96,3 +98,23 @@ def test_training_window_extra_months_widens_the_start_only():
 
     assert widened_window.index.min() < standard_window.index.min()
     assert widened_window.index.max() == standard_window.index.max()
+
+
+def test_tickers_with_complete_history_excludes_only_incomplete_tickers():
+    dates = pd.bdate_range("2020-01-01", periods=5)
+    wide_prices = pd.DataFrame(
+        {
+            "COMPLETE_A": [10.0, 11.0, 12.0, 13.0, 14.0],
+            "COMPLETE_B": [20.0, 21.0, 22.0, 23.0, 24.0],
+            "RECENT_IPO": [None, None, None, 30.0, 31.0],
+        },
+        index=dates,
+    )
+
+    result = features.tickers_with_complete_history(wide_prices)
+
+    assert result == ["COMPLETE_A", "COMPLETE_B"]
+    # The surviving tickers' own values are untouched by the incomplete
+    # ticker's presence - this is the property that matters: one column's
+    # gap must never corrupt another column's data.
+    assert wide_prices["COMPLETE_A"].tolist() == [10.0, 11.0, 12.0, 13.0, 14.0]
