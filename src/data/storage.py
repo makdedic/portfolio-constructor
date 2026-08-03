@@ -48,7 +48,10 @@ def get_connection(path: Path | None = None) -> duckdb.DuckDBPyConnection:
             date DATE PRIMARY KEY, risk_free_rate_annual DOUBLE
         )"""
     )
-    conn.execute("CREATE TABLE IF NOT EXISTS sp500_tickers (ticker VARCHAR PRIMARY KEY)")
+    conn.execute("CREATE TABLE IF NOT EXISTS sp500_tickers (ticker VARCHAR PRIMARY KEY, sector VARCHAR)")
+    # Migrates any pre-existing cache file from before the sector column
+    # existed - a no-op on an already-current or freshly created table.
+    conn.execute("ALTER TABLE sp500_tickers ADD COLUMN IF NOT EXISTS sector VARCHAR")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS fetch_log (
             dataset VARCHAR, ticker VARCHAR, start_date DATE, end_date DATE,
@@ -166,6 +169,22 @@ def sp500_tickers_cached(conn: duckdb.DuckDBPyConnection) -> list[str]:
     return [row[0] for row in rows]
 
 
-def replace_sp500_tickers(conn: duckdb.DuckDBPyConnection, tickers: list[str]) -> None:
+def sp500_sectors_cached(conn: duckdb.DuckDBPyConnection, tickers: list[str]) -> dict[str, str]:
+    """Sector for whichever of tickers are already cached with one -
+    tickers with no cached sector (or not cached at all) are simply absent
+    from the result, not an error.
+    """
+    placeholders = ",".join(["?"] * len(tickers))
+    rows = conn.execute(
+        f"SELECT ticker, sector FROM sp500_tickers WHERE ticker IN ({placeholders}) AND sector IS NOT NULL",
+        tickers,
+    ).fetchall()
+    return dict(rows)
+
+
+def replace_sp500_constituents(conn: duckdb.DuckDBPyConnection, constituents: pd.DataFrame) -> None:
+    """constituents: a ticker, sector DataFrame (see ingest.fetch_sp500_constituents)."""
     conn.execute("DELETE FROM sp500_tickers")
-    conn.executemany("INSERT INTO sp500_tickers VALUES (?)", [(ticker,) for ticker in tickers])
+    conn.register("_constituents", constituents)
+    conn.execute("INSERT INTO sp500_tickers (ticker, sector) SELECT ticker, sector FROM _constituents")
+    conn.unregister("_constituents")

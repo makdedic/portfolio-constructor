@@ -116,5 +116,46 @@ def test_risk_free_rate_coverage_and_round_trip(conn):
 def test_sp500_tickers_cache_hit_and_miss(conn):
     assert storage.sp500_tickers_cached(conn) == []
 
-    storage.replace_sp500_tickers(conn, ["AAPL", "MSFT"])
+    constituents = pd.DataFrame({"ticker": ["AAPL", "MSFT"], "sector": ["Information Technology"] * 2})
+    storage.replace_sp500_constituents(conn, constituents)
     assert storage.sp500_tickers_cached(conn) == ["AAPL", "MSFT"]
+
+
+def test_sp500_sectors_cached_excludes_unknown_tickers_rather_than_erroring(conn):
+    constituents = pd.DataFrame(
+        {"ticker": ["AAPL", "JPM"], "sector": ["Information Technology", "Financials"]}
+    )
+    storage.replace_sp500_constituents(conn, constituents)
+
+    sectors = storage.sp500_sectors_cached(conn, ["AAPL", "JPM", "NOT_A_REAL_TICKER"])
+
+    assert sectors == {"AAPL": "Information Technology", "JPM": "Financials"}
+
+
+def test_replace_sp500_constituents_overwrites_the_previous_set(conn):
+    storage.replace_sp500_constituents(
+        conn, pd.DataFrame({"ticker": ["AAPL"], "sector": ["Information Technology"]})
+    )
+    storage.replace_sp500_constituents(
+        conn, pd.DataFrame({"ticker": ["JPM"], "sector": ["Financials"]})
+    )
+
+    assert storage.sp500_tickers_cached(conn) == ["JPM"]
+
+
+def test_get_connection_migrates_a_pre_existing_single_column_sp500_tickers_table(tmp_path):
+    db_path = tmp_path / "old_schema.duckdb"
+
+    # Simulate a cache file from before the sector column existed.
+    import duckdb
+
+    old_conn = duckdb.connect(str(db_path))
+    old_conn.execute("CREATE TABLE sp500_tickers (ticker VARCHAR PRIMARY KEY)")
+    old_conn.execute("INSERT INTO sp500_tickers VALUES ('AAPL'), ('MSFT')")
+    old_conn.close()
+
+    migrated_conn = storage.get_connection(db_path)
+
+    assert storage.sp500_tickers_cached(migrated_conn) == ["AAPL", "MSFT"]
+    assert storage.sp500_sectors_cached(migrated_conn, ["AAPL", "MSFT"]) == {}
+    migrated_conn.close()
