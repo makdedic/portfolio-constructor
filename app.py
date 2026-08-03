@@ -175,14 +175,21 @@ with persistent_col:
 with persistent_table_col:
     st.dataframe(top_holdings.rename("total weight").to_frame().round(2))
 
-st.header("Holdings count and sector composition over time")
+st.header("Portfolio breadth and sector composition over time")
 st.caption(
-    "Sector uses today's GICS classification applied across the whole backtest — a ticker "
-    "reclassified between sectors historically wouldn't show that change, same simplification "
-    "already used for today's S&P 500 constituent list."
+    "Cumulative distinct tickers ever held — a steadily climbing line means broad rotation "
+    "through the universe; a line that plateaus means the strategy settles into a persistent "
+    "core set and keeps reusing it. Sector uses today's GICS classification applied across "
+    "the whole backtest — a ticker reclassified between sectors historically wouldn't show "
+    "that change, same simplification already used for today's S&P 500 constituent list."
 )
-holdings_count = rebalance_log["selected_tickers"].apply(len)
-st.line_chart(holdings_count.rename("number of holdings"))
+seen_tickers = set()
+cumulative_unique_counts = []
+for tickers_at_rebalance in rebalance_log["selected_tickers"]:
+    seen_tickers.update(tickers_at_rebalance)
+    cumulative_unique_counts.append(len(seen_tickers))
+cumulative_unique_holdings = pd.Series(cumulative_unique_counts, index=rebalance_log.index)
+st.line_chart(cumulative_unique_holdings.rename("cumulative distinct tickers held"))
 
 all_held_tickers = tuple(sorted(set().union(*rebalance_log["selected_tickers"])))
 sector_lookup = load_sp500_sectors_cached(all_held_tickers)
