@@ -116,8 +116,9 @@ def load_or_fetch_risk_free_rate(start: date, end: date) -> pd.DataFrame:
     return storage.query_risk_free_rate(conn, start, end)
 
 
-def fetch_sp500_tickers() -> list[str]:
-    """Current S&P 500 constituent tickers, scraped from Wikipedia.
+def fetch_sp500_constituents() -> pd.DataFrame:
+    """Current S&P 500 constituents, scraped from Wikipedia: ticker, sector
+    (GICS Sector).
 
     Wikipedia uses "." for share classes (e.g. "BRK.B"); yfinance expects
     "-" (e.g. "BRK-B") - normalised here. match="Symbol" targets the
@@ -131,8 +132,14 @@ def fetch_sp500_tickers() -> list[str]:
     response = requests.get(config.SP500_WIKIPEDIA_URL, headers={"User-Agent": "Mozilla/5.0"})
     response.raise_for_status()
     tables = pd.read_html(io.StringIO(response.text), match="Symbol")
-    tickers = tables[0]["Symbol"].str.replace(".", "-", regex=False)
-    return sorted(tickers.tolist())
+    table = tables[0][["Symbol", "GICS Sector"]].rename(columns={"Symbol": "ticker", "GICS Sector": "sector"})
+    table["ticker"] = table["ticker"].str.replace(".", "-", regex=False)
+    return table.sort_values("ticker").reset_index(drop=True)
+
+
+def fetch_sp500_tickers() -> list[str]:
+    """Just the ticker symbols, for callers that don't need sector info."""
+    return fetch_sp500_constituents()["ticker"].tolist()
 
 
 def load_or_fetch_sp500_tickers() -> list[str]:
@@ -145,6 +152,26 @@ def load_or_fetch_sp500_tickers() -> list[str]:
     cached = storage.sp500_tickers_cached(conn)
     if cached:
         return cached
-    tickers = fetch_sp500_tickers()
-    storage.replace_sp500_tickers(conn, tickers)
-    return tickers
+    constituents = fetch_sp500_constituents()
+    storage.replace_sp500_constituents(conn, constituents)
+    return constituents["ticker"].tolist()
+
+
+def load_or_fetch_sp500_sectors(tickers: list[str]) -> dict[str, str]:
+    """GICS sector for each of tickers, from the same cached S&P 500 scrape
+    load_or_fetch_sp500_tickers uses - covers the dev universe too, since
+    every DEV_TICKERS symbol is itself a current S&P 500 constituent
+    (verified directly, not assumed).
+
+    Uses today's sector classification across the whole backtest history -
+    a ticker reclassified between sectors at some point wouldn't show that
+    change. Same simplification already accepted for using today's
+    constituent list (survivorship bias).
+    """
+    conn = storage.get_connection()
+    sectors = storage.sp500_sectors_cached(conn, tickers)
+    if len(sectors) < len(set(tickers)):
+        constituents = fetch_sp500_constituents()
+        storage.replace_sp500_constituents(conn, constituents)
+        sectors = storage.sp500_sectors_cached(conn, tickers)
+    return sectors
