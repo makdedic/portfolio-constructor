@@ -50,6 +50,11 @@ def load_sp500_tickers_cached() -> list[str]:
     return ingest.load_or_fetch_sp500_tickers()
 
 
+@st.cache_data(show_spinner="Fetching sector classifications...")
+def load_sp500_sectors_cached(tickers: tuple[str, ...]) -> dict[str, str]:
+    return ingest.load_or_fetch_sp500_sectors(list(tickers))
+
+
 st.sidebar.header("Ticker universe")
 universe_choice = st.sidebar.radio("Universe", [DEV_UNIVERSE_LABEL, SP500_UNIVERSE_LABEL])
 
@@ -169,6 +174,33 @@ with persistent_col:
     st.bar_chart(top_holdings)
 with persistent_table_col:
     st.dataframe(top_holdings.rename("total weight").to_frame().round(2))
+
+st.header("Holdings count and sector composition over time")
+st.caption(
+    "Sector uses today's GICS classification applied across the whole backtest — a ticker "
+    "reclassified between sectors historically wouldn't show that change, same simplification "
+    "already used for today's S&P 500 constituent list."
+)
+holdings_count = rebalance_log["selected_tickers"].apply(len)
+st.line_chart(holdings_count.rename("number of holdings"))
+
+all_held_tickers = tuple(sorted(set().union(*rebalance_log["selected_tickers"])))
+sector_lookup = load_sp500_sectors_cached(all_held_tickers)
+
+
+def _sector_weights(weights: dict) -> dict:
+    sector_totals: dict[str, float] = {}
+    for ticker, weight in weights.items():
+        sector = sector_lookup.get(ticker, "Unknown")
+        sector_totals[sector] = sector_totals.get(sector, 0.0) + weight
+    return sector_totals
+
+
+sector_weights_over_time = (
+    pd.DataFrame([_sector_weights(w) for w in rebalance_log["weights"]], index=rebalance_log.index).fillna(0.0)
+    * 100
+)
+st.area_chart(sector_weights_over_time)
 
 st.header("Risk metrics: strategy vs. benchmarks")
 st.caption("All metrics computed net of the configured transaction cost.")
