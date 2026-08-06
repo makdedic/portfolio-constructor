@@ -85,6 +85,12 @@ RISK_FREE_RATE_FRED_SERIES = "DTB3"  # 3-month T-bill, secondary market rate
 # --- S&P 500 universe (full, optional) ----------------------------------------
 SP500_WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 
+# yf.download() already defaults to this; yf.Ticker(...).dividends doesn't
+# expose a timeout at all, so src/data/ingest.py enforces one via a custom
+# requests.Session - without it, a single hung request could block the
+# sequential per-ticker dividend fetch indefinitely.
+YFINANCE_REQUEST_TIMEOUT_SECONDS = 10
+
 # --- Orchestration (Prefect) --------------------------------------------------
 PREFECT_TASK_RETRIES = 2
 PREFECT_RETRY_DELAY_SECONDS = 10

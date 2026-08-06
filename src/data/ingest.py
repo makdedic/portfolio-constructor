@@ -24,6 +24,19 @@ from src import config
 from src.data import storage
 
 
+class _TimeoutSession(requests.Session):
+    """A requests.Session that enforces a default timeout on every call.
+
+    yf.Ticker(...) accepts a session but no timeout - without this, a single
+    hung request in fetch_dividends' sequential per-ticker loop could block
+    it indefinitely, with no way to recover short of restarting the process.
+    """
+
+    def request(self, *args, **kwargs):
+        kwargs.setdefault("timeout", config.YFINANCE_REQUEST_TIMEOUT_SECONDS)
+        return super().request(*args, **kwargs)
+
+
 def fetch_price_history(tickers: list[str], start: date, end: date) -> pd.DataFrame:
     """Daily OHLCV and adjusted close for every ticker.
 
@@ -43,9 +56,10 @@ def fetch_dividends(tickers: list[str], start: date, end: date) -> pd.DataFrame:
     (src/data/features.py) free of lookahead bias.
     """
     start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
+    session = _TimeoutSession()
     rows = []
     for ticker in tickers:
-        dividends = yf.Ticker(ticker).dividends
+        dividends = yf.Ticker(ticker, session=session).dividends
         dividend_dates = dividends.index.tz_convert(None).normalize()
         for dividend_date, amount in zip(dividend_dates, dividends.to_numpy()):
             if start_ts <= dividend_date <= end_ts:

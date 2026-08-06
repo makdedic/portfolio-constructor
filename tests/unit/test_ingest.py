@@ -1,12 +1,15 @@
 """Guards the S&P 500 constituent sourcing: ticker normalisation for
-yfinance compatibility, and that load_or_fetch_X correctly delegates
-caching to src.data.storage (DuckDB) rather than duplicating that logic.
+yfinance compatibility, that load_or_fetch_X correctly delegates caching to
+src.data.storage (DuckDB) rather than duplicating that logic, and that
+dividend fetches are timeout-protected.
 """
 
-from unittest.mock import patch
+from datetime import date
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
+from src import config
 from src.data import ingest, storage
 
 
@@ -144,3 +147,32 @@ def test_load_or_fetch_prices_shares_cached_data_across_overlapping_ticker_sets(
 
     assert len(first_result) == 1
     assert set(second_result["ticker"]) == {"AAPL", "MSFT"}
+
+
+def test_timeout_session_injects_default_timeout_on_bare_requests():
+    session = ingest._TimeoutSession()
+    with patch("requests.Session.request", return_value="ok") as request_mock:
+        session.request("GET", "https://example.com")
+
+    request_mock.assert_called_once_with(
+        "GET", "https://example.com", timeout=config.YFINANCE_REQUEST_TIMEOUT_SECONDS
+    )
+
+
+def test_timeout_session_does_not_override_an_explicit_timeout():
+    session = ingest._TimeoutSession()
+    with patch("requests.Session.request", return_value="ok") as request_mock:
+        session.request("GET", "https://example.com", timeout=1)
+
+    request_mock.assert_called_once_with("GET", "https://example.com", timeout=1)
+
+
+def test_fetch_dividends_passes_a_timeout_enforcing_session_to_yf_ticker():
+    fake_ticker = MagicMock()
+    fake_ticker.dividends = pd.Series([], index=pd.DatetimeIndex([], tz="UTC"), dtype=float)
+
+    with patch("src.data.ingest.yf.Ticker", return_value=fake_ticker) as ticker_mock:
+        ingest.fetch_dividends(["AAPL"], date(2020, 1, 1), date(2020, 12, 31))
+
+    _, kwargs = ticker_mock.call_args
+    assert isinstance(kwargs["session"], ingest._TimeoutSession)
