@@ -78,7 +78,14 @@ optimiser_choice = st.sidebar.selectbox("Optimiser", list(OPTIMISER_FN_OPTIONS.k
 st.sidebar.header("Risk-free rate")
 use_real_rate = st.sidebar.checkbox("Use real FRED risk-free rate (instead of flat 2%)")
 
-run_clicked = st.sidebar.button("Run backtest", type="primary")
+run_clicked = st.sidebar.button(
+    "Run backtest",
+    type="primary",
+    disabled=st.session_state.get("pipeline_running", False),
+    help="Disabled while a run is in progress, to avoid firing a second heavy fetch on top of one already in flight."
+    if st.session_state.get("pipeline_running", False)
+    else None,
+)
 
 # st.button() only returns True on the exact rerun triggered by that click —
 # every other widget on the page (like the date selector below) also
@@ -99,11 +106,17 @@ if run_clicked:
                 f"{config.MAX_WEIGHT_PER_STOCK:.0%} per-stock weight cap infeasible."
             )
             st.stop()
-    st.session_state["results"] = run_pipeline_cached(
-        tuple(selected_tickers), rank_choice, optimiser_choice, use_real_rate
-    )
-    rate_label = "real FRED risk-free rate" if use_real_rate else "flat 2% risk-free rate"
-    st.session_state["config_caption"] = f"{rank_choice} · {optimiser_choice} · {universe_choice} · {rate_label}"
+    st.session_state["pipeline_running"] = True
+    try:
+        st.session_state["results"] = run_pipeline_cached(
+            tuple(selected_tickers), rank_choice, optimiser_choice, use_real_rate
+        )
+        rate_label = "real FRED risk-free rate" if use_real_rate else "flat 2% risk-free rate"
+        st.session_state["config_caption"] = (
+            f"{rank_choice} · {optimiser_choice} · {universe_choice} · {rate_label}"
+        )
+    finally:
+        st.session_state["pipeline_running"] = False
 
 if "results" not in st.session_state:
     st.info("Choose a configuration in the sidebar and click **Run backtest** to get started.")
