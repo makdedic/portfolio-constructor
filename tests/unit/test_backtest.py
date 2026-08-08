@@ -199,6 +199,27 @@ def test_select_target_weights_falls_back_to_equal_weight_on_optimiser_failure()
     assert len(set(weights.values())) == 1  # every weight is identical
 
 
+def test_select_target_weights_falls_back_to_equal_weight_when_no_asset_beats_the_risk_free_rate():
+    # pypfopt's max_sharpe raises a plain ValueError (not OptimizationError)
+    # when every candidate's expected return sits below the risk-free rate -
+    # verified against real 2026 rebalance dates once the backtest range
+    # reached "today". Same fallback as the OptimizationError case above.
+    prices = _synthetic_universe(n_tickers=8)
+    tickers = [c for c in prices.columns if c != "BENCH"]
+    dividends = _synthetic_dividends(tickers)
+
+    def failing_optimiser(prices, risk_free_rate):
+        raise ValueError("at least one of the assets must have an expected return exceeding the risk-free rate")
+
+    weights = backtest._select_target_weights(
+        prices[tickers], dividends, pd.Timestamp("2018-01-31"), optimiser_fn=failing_optimiser
+    )
+
+    assert sum(weights.values()) == pytest.approx(1.0)
+    assert len(weights) == len(tickers)
+    assert len(set(weights.values())) == 1
+
+
 def test_select_target_weights_looks_up_the_risk_free_rate_as_of_the_rebalance_date():
     prices = _synthetic_universe(n_tickers=8)
     tickers = [c for c in prices.columns if c != "BENCH"]

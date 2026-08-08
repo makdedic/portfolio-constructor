@@ -74,13 +74,16 @@ def _select_target_weights(
     rate = config.RISK_FREE_RATE_ANNUAL if risk_free_rate is None else risk_free_rate.asof(as_of_date)
     try:
         return optimiser_fn(training_window[list(top_holdings)], risk_free_rate=rate)
-    except pypfopt_exceptions.OptimizationError:
+    except (pypfopt_exceptions.OptimizationError, ValueError):
         # max_sharpe_weights can become numerically infeasible during
-        # extreme market stress - verified against the 2020-03-31 COVID-
-        # crash rebalance, where trailing 3-year expected returns for the
-        # selected holdings ranged from -56% to +16%. Equal-weight the same
-        # holdings for this one rebalance rather than halting the whole
-        # walk-forward backtest.
+        # extreme market stress (OptimizationError - verified against the
+        # 2020-03-31 COVID-crash rebalance, where trailing 3-year expected
+        # returns for the selected holdings ranged from -56% to +16%), or
+        # raise a plain ValueError when every candidate's expected return
+        # sits below the risk-free rate (verified against real 2026
+        # rebalance dates, once the backtest range reached "today"). Equal-
+        # weight the same holdings for this one rebalance rather than
+        # halting the whole walk-forward backtest.
         return {ticker: 1 / len(top_holdings) for ticker in top_holdings}
 
 
