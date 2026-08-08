@@ -1,13 +1,15 @@
 """Guards the S&P 500 constituent sourcing: ticker normalisation for
 yfinance compatibility, that load_or_fetch_X correctly delegates caching to
 src.data.storage (DuckDB) rather than duplicating that logic, and that
-dividend fetches are timeout-protected.
+price/dividend fetches retry with backoff on a rate limit.
 """
 
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
+import pytest
+from yfinance.exceptions import YFRateLimitError
 
 from src import config
 from src.data import ingest, storage
@@ -149,30 +151,62 @@ def test_load_or_fetch_prices_shares_cached_data_across_overlapping_ticker_sets(
     assert set(second_result["ticker"]) == {"AAPL", "MSFT"}
 
 
-def test_timeout_session_injects_default_timeout_on_bare_requests():
-    session = ingest._TimeoutSession()
-    with patch("requests.Session.request", return_value="ok") as request_mock:
-        session.request("GET", "https://example.com")
+def test_download_with_retry_retries_and_recovers_from_a_rate_limit():
+    fake_result = pd.DataFrame({"Close": [1.0]})
 
-    request_mock.assert_called_once_with(
-        "GET", "https://example.com", timeout=config.YFINANCE_REQUEST_TIMEOUT_SECONDS
+    with patch(
+        "src.data.ingest.yf.download", side_effect=[YFRateLimitError(), YFRateLimitError(), fake_result]
+    ) as download_mock, patch("src.data.ingest.time.sleep") as sleep_mock:
+        result = ingest._download_with_retry(["AAPL"], date(2020, 1, 1), date(2020, 12, 31))
+
+    assert result is fake_result
+    assert download_mock.call_count == 3
+    # Exponential backoff: base * 2**0, then base * 2**1.
+    assert sleep_mock.call_args_list == [
+        ((config.YFINANCE_DOWNLOAD_BACKOFF_BASE_SECONDS,),),
+        ((config.YFINANCE_DOWNLOAD_BACKOFF_BASE_SECONDS * 2,),),
+    ]
+
+
+def test_download_with_retry_raises_after_exhausting_retries():
+    with patch("src.data.ingest.yf.download", side_effect=YFRateLimitError()), patch(
+        "src.data.ingest.time.sleep"
+    ):
+        with pytest.raises(YFRateLimitError):
+            ingest._download_with_retry(["AAPL"], date(2020, 1, 1), date(2020, 12, 31))
+
+
+def test_fetch_price_history_uses_the_retrying_batched_download():
+    dates = pd.to_datetime(["2023-01-03"]).rename("Date")
+    columns = pd.MultiIndex.from_tuples([("Close", "AAPL")], names=["Price", "Ticker"])
+    wide = pd.DataFrame([[100.0]], index=dates, columns=columns)
+
+    with patch("src.data.ingest._download_with_retry", return_value=wide) as download_mock:
+        ingest.fetch_price_history(["AAPL"], date(2023, 1, 1), date(2023, 1, 31))
+
+    download_mock.assert_called_once_with(
+        ["AAPL"], date(2023, 1, 1), date(2023, 1, 31), auto_adjust=False
     )
 
 
-def test_timeout_session_does_not_override_an_explicit_timeout():
-    session = ingest._TimeoutSession()
-    with patch("requests.Session.request", return_value="ok") as request_mock:
-        session.request("GET", "https://example.com", timeout=1)
+def test_fetch_dividends_filters_zero_padding_and_reshapes_to_long_format():
+    """yfinance pads every non-payment day with 0.0 in the Dividends column -
+    sourced from the same batched download as prices (see
+    _download_with_retry's docstring for why), not the far more
+    rate-limit-prone yf.Ticker(...).dividends per-ticker endpoint.
+    """
+    dates = pd.to_datetime(["2023-01-03", "2023-01-04"])
+    columns = pd.MultiIndex.from_tuples(
+        [("Dividends", "AAPL"), ("Dividends", "MSFT")], names=["Price", "Ticker"]
+    )
+    wide = pd.DataFrame([[0.24, 0.0], [0.0, 0.0]], index=dates, columns=columns)
 
-    request_mock.assert_called_once_with("GET", "https://example.com", timeout=1)
+    with patch("src.data.ingest._download_with_retry", return_value=wide) as download_mock:
+        result = ingest.fetch_dividends(["AAPL", "MSFT"], date(2023, 1, 1), date(2023, 1, 31))
 
-
-def test_fetch_dividends_passes_a_timeout_enforcing_session_to_yf_ticker():
-    fake_ticker = MagicMock()
-    fake_ticker.dividends = pd.Series([], index=pd.DatetimeIndex([], tz="UTC"), dtype=float)
-
-    with patch("src.data.ingest.yf.Ticker", return_value=fake_ticker) as ticker_mock:
-        ingest.fetch_dividends(["AAPL"], date(2020, 1, 1), date(2020, 12, 31))
-
-    _, kwargs = ticker_mock.call_args
-    assert isinstance(kwargs["session"], ingest._TimeoutSession)
+    download_mock.assert_called_once_with(
+        ["AAPL", "MSFT"], date(2023, 1, 1), date(2023, 1, 31), actions=True, auto_adjust=False
+    )
+    assert result.to_dict("records") == [
+        {"date": pd.Timestamp("2023-01-03"), "ticker": "AAPL", "dividend_amount": 0.24}
+    ]

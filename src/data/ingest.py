@@ -13,28 +13,37 @@ format is trivial to filter, inspect, and reason about column by column.
 """
 
 import io
+import time
 from datetime import date
 
 import pandas as pd
 import requests
 import yfinance as yf
 from pandas_datareader import data as pdr
+from yfinance.exceptions import YFRateLimitError
 
 from src import config
 from src.data import storage
 
 
-class _TimeoutSession(requests.Session):
-    """A requests.Session that enforces a default timeout on every call.
+def _download_with_retry(tickers: list[str], start: date, end: date, **kwargs) -> pd.DataFrame:
+    """yf.download(), retrying with exponential backoff if Yahoo rate-limits
+    the request.
 
-    yf.Ticker(...) accepts a session but no timeout - without this, a single
-    hung request in fetch_dividends' sequential per-ticker loop could block
-    it indefinitely, with no way to recover short of restarting the process.
+    Both prices and dividends are sourced through this one batched endpoint
+    (see fetch_dividends) rather than yf.Ticker(...).dividends' separate
+    per-ticker endpoint - verified directly that a sequential per-ticker
+    dividend loop reliably tripped Yahoo's rate limit, on this machine and
+    the deployed app alike, while this batched call has stayed reliable
+    throughout. yf.download() already defaults to a 10s per-request timeout.
     """
-
-    def request(self, *args, **kwargs):
-        kwargs.setdefault("timeout", config.YFINANCE_REQUEST_TIMEOUT_SECONDS)
-        return super().request(*args, **kwargs)
+    for attempt in range(config.YFINANCE_DOWNLOAD_MAX_RETRIES + 1):
+        try:
+            return yf.download(tickers, start=start, end=end, progress=False, **kwargs)
+        except YFRateLimitError:
+            if attempt == config.YFINANCE_DOWNLOAD_MAX_RETRIES:
+                raise
+            time.sleep(config.YFINANCE_DOWNLOAD_BACKOFF_BASE_SECONDS * (2**attempt))
 
 
 def fetch_price_history(tickers: list[str], start: date, end: date) -> pd.DataFrame:
@@ -42,7 +51,7 @@ def fetch_price_history(tickers: list[str], start: date, end: date) -> pd.DataFr
 
     Columns: date, ticker, open, high, low, close, adj_close, volume.
     """
-    wide = yf.download(tickers, start=start, end=end, auto_adjust=False, progress=False)
+    wide = _download_with_retry(tickers, start, end, auto_adjust=False)
     long = wide.stack(level="Ticker", future_stack=True).reset_index()
     long.columns = [str(column).lower().replace(" ", "_") for column in long.columns]
     return long.sort_values(["ticker", "date"]).reset_index(drop=True)
@@ -51,22 +60,20 @@ def fetch_price_history(tickers: list[str], start: date, end: date) -> pd.DataFr
 def fetch_dividends(tickers: list[str], start: date, end: date) -> pd.DataFrame:
     """Real historical dividend payments: date, ticker, dividend_amount.
 
+    Sourced from the same batched yf.download(..., actions=True) call as
+    fetch_price_history, not yf.Ticker(...).dividends' separate per-ticker
+    endpoint - see _download_with_retry's docstring for why.
+
     These are the actual amounts paid on their actual payment dates, not
     restated fundamentals — that's what keeps the dividend-yield factor
-    (src/data/features.py) free of lookahead bias.
+    (src/data/features.py) free of lookahead bias. yfinance pads
+    non-payment days with 0.0 in this column, so those rows are dropped.
     """
-    start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
-    session = _TimeoutSession()
-    rows = []
-    for ticker in tickers:
-        dividends = yf.Ticker(ticker, session=session).dividends
-        dividend_dates = dividends.index.tz_convert(None).normalize()
-        for dividend_date, amount in zip(dividend_dates, dividends.to_numpy()):
-            if start_ts <= dividend_date <= end_ts:
-                rows.append({"date": dividend_date, "ticker": ticker, "dividend_amount": amount})
-    return pd.DataFrame(rows, columns=["date", "ticker", "dividend_amount"]).sort_values(
-        ["ticker", "date"]
-    ).reset_index(drop=True)
+    wide = _download_with_retry(tickers, start, end, actions=True, auto_adjust=False)
+    long = wide["Dividends"].stack(future_stack=True).reset_index()
+    long.columns = ["date", "ticker", "dividend_amount"]
+    long = long[long["dividend_amount"] != 0]
+    return long.sort_values(["ticker", "date"]).reset_index(drop=True)
 
 
 def to_wide_adj_close(price_long: pd.DataFrame) -> pd.DataFrame:
