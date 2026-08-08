@@ -26,9 +26,18 @@ from src import config
 from src.data import storage
 
 
-def _download_with_retry(tickers: list[str], start: date, end: date, **kwargs) -> pd.DataFrame:
+class _BadDownloadError(Exception):
+    """Raised when yf.download() returns without error but with data that
+    looks like a failed fetch - confirmed directly that this happens for
+    real: a batched call can silently come back with an entire ticker's
+    column all-NaN, no exception raised at all, and that garbage would
+    otherwise get cached as if it were good data.
+    """
+
+
+def _download_with_retry(tickers: list[str], start: date, end: date, is_valid=None, **kwargs) -> pd.DataFrame:
     """yf.download(), retrying with exponential backoff if Yahoo rate-limits
-    the request.
+    the request, or if is_valid rejects a non-raising but bad response.
 
     Both prices and dividends are sourced through this one batched endpoint
     (see fetch_dividends) rather than yf.Ticker(...).dividends' separate
@@ -39,11 +48,28 @@ def _download_with_retry(tickers: list[str], start: date, end: date, **kwargs) -
     """
     for attempt in range(config.YFINANCE_DOWNLOAD_MAX_RETRIES + 1):
         try:
-            return yf.download(tickers, start=start, end=end, progress=False, **kwargs)
-        except YFRateLimitError:
+            wide = yf.download(tickers, start=start, end=end, progress=False, **kwargs)
+            if is_valid is not None and not is_valid(wide):
+                raise _BadDownloadError()
+            return wide
+        except (YFRateLimitError, _BadDownloadError):
             if attempt == config.YFINANCE_DOWNLOAD_MAX_RETRIES:
                 raise
             time.sleep(config.YFINANCE_DOWNLOAD_BACKOFF_BASE_SECONDS * (2**attempt))
+
+
+def _has_no_all_nan_ticker(wide: pd.DataFrame) -> bool:
+    """False if any requested ticker's Adj Close is entirely NaN.
+
+    Every ticker in this project's universe traded during at least part of
+    any requested range, so a wholly-NaN column is never a legitimate "no
+    data" case (unlike dividends, where a ticker legitimately paying zero
+    dividends is normal and expected) - it's the signature of yf.download
+    silently failing for that ticker.
+    """
+    if wide.empty or "Adj Close" not in wide.columns.get_level_values(0):
+        return False
+    return not wide["Adj Close"].isna().all().any()
 
 
 def fetch_price_history(tickers: list[str], start: date, end: date) -> pd.DataFrame:
@@ -51,7 +77,7 @@ def fetch_price_history(tickers: list[str], start: date, end: date) -> pd.DataFr
 
     Columns: date, ticker, open, high, low, close, adj_close, volume.
     """
-    wide = _download_with_retry(tickers, start, end, auto_adjust=False)
+    wide = _download_with_retry(tickers, start, end, is_valid=_has_no_all_nan_ticker, auto_adjust=False)
     long = wide.stack(level="Ticker", future_stack=True).reset_index()
     long.columns = [str(column).lower().replace(" ", "_") for column in long.columns]
     return long.sort_values(["ticker", "date"]).reset_index(drop=True)

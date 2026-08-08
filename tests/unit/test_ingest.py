@@ -184,9 +184,56 @@ def test_fetch_price_history_uses_the_retrying_batched_download():
     with patch("src.data.ingest._download_with_retry", return_value=wide) as download_mock:
         ingest.fetch_price_history(["AAPL"], date(2023, 1, 1), date(2023, 1, 31))
 
-    download_mock.assert_called_once_with(
-        ["AAPL"], date(2023, 1, 1), date(2023, 1, 31), auto_adjust=False
+    args, kwargs = download_mock.call_args
+    assert args == (["AAPL"], date(2023, 1, 1), date(2023, 1, 31))
+    assert kwargs["is_valid"] is ingest._has_no_all_nan_ticker
+    assert kwargs["auto_adjust"] is False
+
+
+def test_has_no_all_nan_ticker_flags_a_wholly_empty_column_as_invalid():
+    dates = pd.to_datetime(["2023-01-03", "2023-01-04"])
+    columns = pd.MultiIndex.from_tuples(
+        [("Adj Close", "AAPL"), ("Adj Close", "MSFT")], names=["Price", "Ticker"]
     )
+    wide = pd.DataFrame([[100.0, None], [101.0, None]], index=dates, columns=columns)
+
+    assert ingest._has_no_all_nan_ticker(wide) is False
+
+
+def test_has_no_all_nan_ticker_accepts_real_data():
+    dates = pd.to_datetime(["2023-01-03", "2023-01-04"])
+    columns = pd.MultiIndex.from_tuples(
+        [("Adj Close", "AAPL"), ("Adj Close", "MSFT")], names=["Price", "Ticker"]
+    )
+    wide = pd.DataFrame([[100.0, 50.0], [101.0, 51.0]], index=dates, columns=columns)
+
+    assert ingest._has_no_all_nan_ticker(wide) is True
+
+
+def test_download_with_retry_retries_on_invalid_data_then_succeeds():
+    bad_result = pd.DataFrame({"Adj Close": [None]})
+    good_result = pd.DataFrame({"Adj Close": [100.0]})
+
+    with patch(
+        "src.data.ingest.yf.download", side_effect=[bad_result, good_result]
+    ) as download_mock, patch("src.data.ingest.time.sleep") as sleep_mock:
+        result = ingest._download_with_retry(
+            ["AAPL"], date(2020, 1, 1), date(2020, 12, 31), is_valid=lambda wide: not wide["Adj Close"].isna().any()
+        )
+
+    assert result is good_result
+    assert download_mock.call_count == 2
+    sleep_mock.assert_called_once_with(config.YFINANCE_DOWNLOAD_BACKOFF_BASE_SECONDS)
+
+
+def test_download_with_retry_raises_after_exhausting_retries_on_invalid_data():
+    bad_result = pd.DataFrame({"Adj Close": [None]})
+
+    with patch("src.data.ingest.yf.download", return_value=bad_result), patch("src.data.ingest.time.sleep"):
+        with pytest.raises(ingest._BadDownloadError):
+            ingest._download_with_retry(
+                ["AAPL"], date(2020, 1, 1), date(2020, 12, 31), is_valid=lambda wide: False
+            )
 
 
 def test_fetch_dividends_filters_zero_padding_and_reshapes_to_long_format():
