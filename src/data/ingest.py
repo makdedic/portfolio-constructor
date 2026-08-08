@@ -121,17 +121,23 @@ def load_or_fetch_prices(tickers: list[str], start: date, end: date) -> pd.DataF
     app - on a freshly deployed instance, that's the committed seed
     snapshot (see storage._load_seed), so the app still shows real data,
     just not current as of today.
+
+    Connection is always closed on the way out (even on a caught fetch
+    failure) - confirmed directly that a connection left open by an
+    interrupted run can outlive it in a long-running process like this
+    Streamlit app, and collide with the next run's own write as a DuckDB
+    "write-write conflict", not just a theoretical cross-process risk.
     """
-    conn = storage.get_connection()
-    missing = storage.tickers_needing_fetch(conn, "prices", tickers, start, end)
-    if missing:
-        try:
-            fetched = fetch_price_history(missing, start, end)
-            storage.upsert_prices(conn, fetched)
-            storage.log_fetch(conn, "prices", missing, start, end)
-        except (YFRateLimitError, _BadDownloadError):
-            pass
-    return storage.query_prices(conn, tickers, start, end)
+    with storage.get_connection() as conn:
+        missing = storage.tickers_needing_fetch(conn, "prices", tickers, start, end)
+        if missing:
+            try:
+                fetched = fetch_price_history(missing, start, end)
+                storage.upsert_prices(conn, fetched)
+                storage.log_fetch(conn, "prices", missing, start, end)
+            except (YFRateLimitError, _BadDownloadError):
+                pass
+        return storage.query_prices(conn, tickers, start, end)
 
 
 def load_or_fetch_dividends(tickers: list[str], start: date, end: date) -> pd.DataFrame:
@@ -139,19 +145,20 @@ def load_or_fetch_dividends(tickers: list[str], start: date, end: date) -> pd.Da
     storage for [start, end], fetch only what's missing, then return the
     full requested set from storage.
 
-    Same fall-back-to-cache behaviour on a failed top-up fetch as
-    load_or_fetch_prices - see its docstring for why.
+    Same fall-back-to-cache behaviour on a failed top-up fetch, and same
+    always-close-the-connection reasoning, as load_or_fetch_prices - see
+    its docstring for why.
     """
-    conn = storage.get_connection()
-    missing = storage.tickers_needing_fetch(conn, "dividends", tickers, start, end)
-    if missing:
-        try:
-            fetched = fetch_dividends(missing, start, end)
-            storage.upsert_dividends(conn, fetched)
-            storage.log_fetch(conn, "dividends", missing, start, end)
-        except YFRateLimitError:
-            pass
-    return storage.query_dividends(conn, tickers, start, end)
+    with storage.get_connection() as conn:
+        missing = storage.tickers_needing_fetch(conn, "dividends", tickers, start, end)
+        if missing:
+            try:
+                fetched = fetch_dividends(missing, start, end)
+                storage.upsert_dividends(conn, fetched)
+                storage.log_fetch(conn, "dividends", missing, start, end)
+            except YFRateLimitError:
+                pass
+        return storage.query_dividends(conn, tickers, start, end)
 
 
 def fetch_risk_free_rate(start: date, end: date) -> pd.DataFrame:
@@ -170,13 +177,15 @@ def fetch_risk_free_rate(start: date, end: date) -> pd.DataFrame:
 def load_or_fetch_risk_free_rate(start: date, end: date) -> pd.DataFrame:
     """Read the cached risk-free rate for [start, end] if already covered,
     otherwise fetch and cache it.
+
+    Same always-close-the-connection reasoning as load_or_fetch_prices.
     """
-    conn = storage.get_connection()
-    if not storage.risk_free_rate_covered(conn, start, end):
-        rate = fetch_risk_free_rate(start, end)
-        storage.upsert_risk_free_rate(conn, rate)
-        storage.log_fetch(conn, "risk_free_rate", [storage.NO_TICKER], start, end)
-    return storage.query_risk_free_rate(conn, start, end)
+    with storage.get_connection() as conn:
+        if not storage.risk_free_rate_covered(conn, start, end):
+            rate = fetch_risk_free_rate(start, end)
+            storage.upsert_risk_free_rate(conn, rate)
+            storage.log_fetch(conn, "risk_free_rate", [storage.NO_TICKER], start, end)
+        return storage.query_risk_free_rate(conn, start, end)
 
 
 def fetch_sp500_constituents() -> pd.DataFrame:
@@ -209,15 +218,16 @@ def load_or_fetch_sp500_tickers() -> list[str]:
     """Read cached constituent list if present, otherwise fetch and cache it.
 
     Cached (not re-scraped every run) so a given backtest's universe stays
-    stable and reproducible even if Wikipedia's page changes later.
+    stable and reproducible even if Wikipedia's page changes later. Same
+    always-close-the-connection reasoning as load_or_fetch_prices.
     """
-    conn = storage.get_connection()
-    cached = storage.sp500_tickers_cached(conn)
-    if cached:
-        return cached
-    constituents = fetch_sp500_constituents()
-    storage.replace_sp500_constituents(conn, constituents)
-    return constituents["ticker"].tolist()
+    with storage.get_connection() as conn:
+        cached = storage.sp500_tickers_cached(conn)
+        if cached:
+            return cached
+        constituents = fetch_sp500_constituents()
+        storage.replace_sp500_constituents(conn, constituents)
+        return constituents["ticker"].tolist()
 
 
 def load_or_fetch_sp500_sectors(tickers: list[str]) -> dict[str, str]:
@@ -229,12 +239,13 @@ def load_or_fetch_sp500_sectors(tickers: list[str]) -> dict[str, str]:
     Uses today's sector classification across the whole backtest history -
     a ticker reclassified between sectors at some point wouldn't show that
     change. Same simplification already accepted for using today's
-    constituent list (survivorship bias).
+    constituent list (survivorship bias). Same always-close-the-connection
+    reasoning as load_or_fetch_prices.
     """
-    conn = storage.get_connection()
-    sectors = storage.sp500_sectors_cached(conn, tickers)
-    if len(sectors) < len(set(tickers)):
-        constituents = fetch_sp500_constituents()
-        storage.replace_sp500_constituents(conn, constituents)
+    with storage.get_connection() as conn:
         sectors = storage.sp500_sectors_cached(conn, tickers)
-    return sectors
+        if len(sectors) < len(set(tickers)):
+            constituents = fetch_sp500_constituents()
+            storage.replace_sp500_constituents(conn, constituents)
+            sectors = storage.sp500_sectors_cached(conn, tickers)
+        return sectors
