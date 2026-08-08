@@ -151,6 +151,54 @@ def test_load_or_fetch_prices_shares_cached_data_across_overlapping_ticker_sets(
     assert set(second_result["ticker"]) == {"AAPL", "MSFT"}
 
 
+def test_load_or_fetch_prices_falls_back_to_cache_when_the_top_up_fetch_fails(tmp_path):
+    """On a freshly deployed app, "cache" is the committed seed snapshot -
+    if Yahoo rate-limits the live top-up fetch (confirmed directly this
+    happens on Streamlit Cloud's shared IP, independent of retrying), the
+    app should keep showing that seeded data rather than crashing.
+    """
+    db_path = tmp_path / "test.duckdb"
+    seeded_row = pd.DataFrame(
+        {
+            "date": ["2020-01-01"],
+            "ticker": ["AAPL"],
+            "open": [1.0],
+            "high": [1.0],
+            "low": [1.0],
+            "close": [1.0],
+            "adj_close": [100.0],
+            "volume": [1000.0],
+        }
+    )
+
+    with patch("src.data.storage.config.DUCKDB_PATH", db_path):
+        conn = storage.get_connection()
+        storage.upsert_prices(conn, seeded_row)
+        storage.log_fetch(conn, "prices", ["AAPL"], date(2020, 1, 1), date(2020, 1, 1))
+        conn.close()
+
+        with patch("src.data.ingest.fetch_price_history", side_effect=YFRateLimitError()):
+            result = ingest.load_or_fetch_prices(["AAPL"], date(2020, 1, 1), date(2020, 12, 31))
+
+    assert list(result["ticker"]) == ["AAPL"]
+
+
+def test_load_or_fetch_dividends_falls_back_to_cache_when_the_top_up_fetch_fails(tmp_path):
+    db_path = tmp_path / "test.duckdb"
+    seeded_row = pd.DataFrame({"date": ["2020-01-15"], "ticker": ["AAPL"], "dividend_amount": [0.2]})
+
+    with patch("src.data.storage.config.DUCKDB_PATH", db_path):
+        conn = storage.get_connection()
+        storage.upsert_dividends(conn, seeded_row)
+        storage.log_fetch(conn, "dividends", ["AAPL"], date(2020, 1, 1), date(2020, 1, 1))
+        conn.close()
+
+        with patch("src.data.ingest.fetch_dividends", side_effect=YFRateLimitError()):
+            result = ingest.load_or_fetch_dividends(["AAPL"], date(2020, 1, 1), date(2020, 12, 31))
+
+    assert list(result["ticker"]) == ["AAPL"]
+
+
 def test_download_with_retry_retries_and_recovers_from_a_rate_limit():
     fake_result = pd.DataFrame({"Close": [1.0]})
 

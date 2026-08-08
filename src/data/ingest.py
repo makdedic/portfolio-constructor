@@ -114,13 +114,23 @@ def load_or_fetch_prices(tickers: list[str], start: date, end: date) -> pd.DataF
     """Read cached price history for tickers not already covered in storage
     for [start, end], fetch only what's missing, then return the full
     requested set from storage.
+
+    A failed top-up fetch (e.g. Yahoo rate-limiting the deployed app's
+    shared IP - confirmed directly that no amount of retrying fixes that)
+    falls back to whatever's already cached instead of crashing the whole
+    app - on a freshly deployed instance, that's the committed seed
+    snapshot (see storage._load_seed), so the app still shows real data,
+    just not current as of today.
     """
     conn = storage.get_connection()
     missing = storage.tickers_needing_fetch(conn, "prices", tickers, start, end)
     if missing:
-        fetched = fetch_price_history(missing, start, end)
-        storage.upsert_prices(conn, fetched)
-        storage.log_fetch(conn, "prices", missing, start, end)
+        try:
+            fetched = fetch_price_history(missing, start, end)
+            storage.upsert_prices(conn, fetched)
+            storage.log_fetch(conn, "prices", missing, start, end)
+        except (YFRateLimitError, _BadDownloadError):
+            pass
     return storage.query_prices(conn, tickers, start, end)
 
 
@@ -128,13 +138,19 @@ def load_or_fetch_dividends(tickers: list[str], start: date, end: date) -> pd.Da
     """Read cached dividend history for tickers not already covered in
     storage for [start, end], fetch only what's missing, then return the
     full requested set from storage.
+
+    Same fall-back-to-cache behaviour on a failed top-up fetch as
+    load_or_fetch_prices - see its docstring for why.
     """
     conn = storage.get_connection()
     missing = storage.tickers_needing_fetch(conn, "dividends", tickers, start, end)
     if missing:
-        fetched = fetch_dividends(missing, start, end)
-        storage.upsert_dividends(conn, fetched)
-        storage.log_fetch(conn, "dividends", missing, start, end)
+        try:
+            fetched = fetch_dividends(missing, start, end)
+            storage.upsert_dividends(conn, fetched)
+            storage.log_fetch(conn, "dividends", missing, start, end)
+        except YFRateLimitError:
+            pass
     return storage.query_dividends(conn, tickers, start, end)
 
 
