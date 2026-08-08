@@ -4,8 +4,7 @@ schema, and per-ticker/date-range incremental caching logic.
 ingest.py's fetch_X functions (the ones that actually hit yfinance/FRED/
 Wikipedia) stay pure "hit the external source" calls with no caching
 awareness — its load_or_fetch_X functions call into this module instead of
-doing raw file I/O themselves, the same separation this codebase already
-uses for Prefect (pipeline.py) vs. business logic.
+doing raw file I/O themselves.
 """
 
 from pathlib import Path
@@ -138,9 +137,10 @@ def log_fetch(conn: duckdb.DuckDBPyConnection, dataset: str, tickers: list[str],
     """Records that (dataset, ticker) was fetched for [start, end], regardless
     of whether the fetch produced any data rows.
 
-    INSERT OR REPLACE, not a plain INSERT: Prefect's fetch tasks (pipeline.py)
-    have retries=2, so the same ticker/range can genuinely be logged twice on
-    a transient retry - this keeps that idempotent instead of erroring.
+    INSERT OR REPLACE, not a plain INSERT: the same ticker/range can
+    genuinely get logged twice (a retried fetch, or two callers racing on
+    the same uncached range) - this keeps that idempotent instead of
+    erroring.
     """
     now = pd.Timestamp.now()
     conn.executemany(

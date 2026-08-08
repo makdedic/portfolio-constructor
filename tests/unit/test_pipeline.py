@@ -1,15 +1,13 @@
-"""Guards the pipeline's orchestration/composition, not the underlying
-logic - ingest/backtest/metrics already have their own tests. This checks
-that run_pipeline wires those pieces together correctly: right arguments
-reaching the right calls, and retries configured on the tasks that need
-them.
+"""Guards the pipeline's composition, not the underlying logic -
+ingest/backtest/metrics already have their own tests. This checks that
+run_pipeline wires those pieces together correctly: right arguments
+reaching the right calls.
 """
 
 from unittest.mock import patch
 
 import pandas as pd
 
-from src import config
 from src.data import pipeline
 
 
@@ -164,18 +162,3 @@ def test_default_run_pipeline_never_fetches_the_risk_free_rate():
         fetch_rate_mock.assert_not_called()
         _, backtest_kwargs = run_backtest_mock.call_args
         assert backtest_kwargs["risk_free_rate"] is None
-
-
-def test_fetch_tasks_are_configured_with_retries_but_computation_tasks_are_not():
-    assert pipeline.fetch_prices_task.retries == config.PREFECT_TASK_RETRIES
-    assert pipeline.fetch_prices_task.retry_delay_seconds == config.PREFECT_RETRY_DELAY_SECONDS
-    assert pipeline.fetch_dividends_task.retries == config.PREFECT_TASK_RETRIES
-    assert pipeline.fetch_dividends_task.retry_delay_seconds == config.PREFECT_RETRY_DELAY_SECONDS
-    assert pipeline.fetch_risk_free_rate_task.retries == config.PREFECT_TASK_RETRIES
-    assert pipeline.fetch_risk_free_rate_task.retry_delay_seconds == config.PREFECT_RETRY_DELAY_SECONDS
-
-    # Deterministic computation on already-fetched data - retrying wouldn't
-    # fix a failure here, so these stay unretried (wrapped only for
-    # observability in Prefect's run history).
-    assert pipeline.run_backtest_task.retries == 0
-    assert pipeline.compute_risk_metrics_task.retries == 0

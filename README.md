@@ -64,10 +64,10 @@ and proper storage. Both passes are complete.
   transaction costs computed from actual price-drifted turnover (not just
   target-to-target), compared against equal-weight and S&P 500 buy-and-hold
   benchmarks
-- **Orchestration** (`src/data/pipeline.py`) — the ingest → backtest →
-  risk-metrics pipeline as a Prefect flow: the two data fetches run
-  concurrently and retry automatically on failure, every step is logged
-  and observable in Prefect's UI
+- **Pipeline** (`src/data/pipeline.py`) — ingest → backtest → risk metrics
+  in one call: the two data fetches run concurrently, each retrying
+  automatically on failure and falling back to cached data if a live
+  fetch can't be completed
 - **Dashboard** (`app.py`) — Streamlit app: pick a ticker universe, run
   the backtest, browse holdings at any historical rebalance date, compare
   risk metrics, see the cumulative-growth chart
@@ -126,8 +126,8 @@ source .venv/bin/activate
 streamlit run app.py
 ```
 
-**The pipeline directly**, e.g. from a Python shell (runs as a Prefect
-flow — retries the data fetches automatically, logs each step):
+**The pipeline directly**, e.g. from a Python shell (retries the data
+fetches automatically, logs each step):
 
 ```python
 from src.data import pipeline
@@ -172,7 +172,7 @@ portfolio-constructor/
 │   │   ├── ingest.py         # yfinance/FRED/Wikipedia fetching (no caching logic itself)
 │   │   ├── storage.py        # DuckDB connection, schema, incremental caching
 │   │   ├── features.py       # alpha factors + tickers_with_complete_history
-│   │   └── pipeline.py       # Prefect flow: ingest -> backtest -> risk metrics
+│   │   └── pipeline.py       # ingest -> backtest -> risk metrics, concurrent fetches
 │   ├── models/
 │   │   ├── ranker.py         # composite z-score ranking (+ momentum-only variant)
 │   │   └── lgbm_ranker.py     # LightGBM ranker, refit fresh at every rebalance

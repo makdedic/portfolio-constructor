@@ -94,10 +94,6 @@ SP500_WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies
 YFINANCE_DOWNLOAD_MAX_RETRIES = 3
 YFINANCE_DOWNLOAD_BACKOFF_BASE_SECONDS = 2
 
-# --- Orchestration (Prefect) --------------------------------------------------
-PREFECT_TASK_RETRIES = 2
-PREFECT_RETRY_DELAY_SECONDS = 10
-
 # --- LightGBM ranker -------------------------------------------------------
 # The training panel is only ~1,000-1,300 rows (~39 tickers x ~30 monthly
 # snapshots), so these stay conservative to avoid overfitting. LightGBM's

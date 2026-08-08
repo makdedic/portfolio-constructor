@@ -83,7 +83,7 @@ def test_zero_row_result_still_counts_as_covered(conn):
 
 
 def test_duplicate_fetch_and_log_is_idempotent(conn):
-    # Simulates a Prefect retry: the exact same fetch+log happens twice.
+    # Simulates a retried fetch: the exact same fetch+log happens twice.
     prices = _prices_df("AAPL", [date(2020, 1, 1), date(2020, 1, 2)])
     storage.upsert_prices(conn, prices)
     storage.log_fetch(conn, "prices", ["AAPL"], date(2020, 1, 1), date(2020, 1, 2))
