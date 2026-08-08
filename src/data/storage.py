@@ -31,7 +31,11 @@ def get_connection(path: Path | None = None) -> duckdb.DuckDBPyConnection:
     notebook) could collide with it. This doesn't eliminate that risk
     entirely - it's a real, accepted limitation, not solved here.
     """
-    conn = duckdb.connect(str(path or config.DUCKDB_PATH))
+    target = path or config.DUCKDB_PATH
+    is_fresh = path is None and not target.exists()
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = duckdb.connect(str(target))
     conn.execute(
         """CREATE TABLE IF NOT EXISTS prices (
             date DATE, ticker VARCHAR, open DOUBLE, high DOUBLE, low DOUBLE,
@@ -58,7 +62,56 @@ def get_connection(path: Path | None = None) -> duckdb.DuckDBPyConnection:
             fetched_at TIMESTAMP, PRIMARY KEY (dataset, ticker, start_date, end_date)
         )"""
     )
+
+    if is_fresh:
+        _load_seed(conn)
     return conn
+
+
+def _load_seed(conn: duckdb.DuckDBPyConnection) -> None:
+    """Populates a freshly created default-path database from the committed
+    seed snapshot (data/seed/, built by scripts/build_seed.py), if present -
+    a no-op for local dev before that script has ever been run.
+
+    Ships the deployed app already warm with a full S&P 500 dataset instead
+    of live-fetching from Yahoo/FRED on first load - confirmed directly that
+    Streamlit Cloud's shared IP gets rate-limited independent of our own
+    request pattern, so no amount of client-side politeness fixes that.
+
+    Only date, ticker, adj_close are seeded for prices (see
+    scripts/build_seed.py for why) - open/high/low/close/volume stay NULL
+    for these rows, which is safe since nothing in this codebase reads them.
+    """
+    tickers_path = config.SEED_DIR / "sp500_tickers.parquet"
+    if not tickers_path.exists():
+        return
+
+    conn.execute(
+        f"""INSERT INTO sp500_tickers (ticker, sector)
+            SELECT ticker, sector FROM read_parquet('{tickers_path}')"""
+    )
+    conn.execute(
+        f"""INSERT INTO prices (date, ticker, adj_close)
+            SELECT date, ticker, adj_close FROM read_parquet('{config.SEED_DIR / "prices.parquet"}')"""
+    )
+    conn.execute(
+        f"""INSERT INTO dividends (date, ticker, dividend_amount)
+            SELECT date, ticker, dividend_amount FROM read_parquet('{config.SEED_DIR / "dividends.parquet"}')"""
+    )
+    conn.execute(
+        f"""INSERT INTO risk_free_rate (date, risk_free_rate_annual)
+            SELECT date, risk_free_rate_annual
+            FROM read_parquet('{config.SEED_DIR / "risk_free_rate.parquet"}')"""
+    )
+
+    seeded_tickers = [row[0] for row in conn.execute("SELECT ticker FROM sp500_tickers").fetchall()]
+    prices_through = conn.execute("SELECT MAX(date) FROM prices").fetchone()[0]
+    dividends_through = conn.execute("SELECT MAX(date) FROM dividends").fetchone()[0]
+    rate_through = conn.execute("SELECT MAX(date) FROM risk_free_rate").fetchone()[0]
+
+    log_fetch(conn, "prices", seeded_tickers, config.DATA_START_DATE, prices_through)
+    log_fetch(conn, "dividends", seeded_tickers, config.DATA_START_DATE, dividends_through)
+    log_fetch(conn, "risk_free_rate", [NO_TICKER], config.DATA_START_DATE, rate_through)
 
 
 def tickers_needing_fetch(

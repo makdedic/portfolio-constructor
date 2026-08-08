@@ -115,3 +115,10 @@ LGBM_MIN_CHILD_SAMPLES = 10
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = PROJECT_ROOT / "data" / "cache"
 DUCKDB_PATH = CACHE_DIR / "portfolio.duckdb"
+
+# Committed to the repo (unlike CACHE_DIR) so a freshly deployed app starts
+# already warm - see storage.get_connection / scripts/build_seed.py. Built
+# once locally, where fetching is reliable, and shipped with the app rather
+# than fetched live on Streamlit Cloud's shared IP, which was confirmed
+# directly to be rate-limited independent of our own request pattern.
+SEED_DIR = PROJECT_ROOT / "data" / "seed"

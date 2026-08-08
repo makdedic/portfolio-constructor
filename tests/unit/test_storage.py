@@ -10,10 +10,12 @@ silently break any test that calls storage functions more than once.
 """
 
 from datetime import date
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
 
+from src import config
 from src.data import storage
 
 
@@ -159,3 +161,54 @@ def test_get_connection_migrates_a_pre_existing_single_column_sp500_tickers_tabl
     assert storage.sp500_tickers_cached(migrated_conn) == ["AAPL", "MSFT"]
     assert storage.sp500_sectors_cached(migrated_conn, ["AAPL", "MSFT"]) == {}
     migrated_conn.close()
+
+
+def test_get_connection_loads_the_committed_seed_into_a_fresh_database(tmp_path):
+    """A freshly deployed app (no existing cache file) should start already
+    warm from the committed seed snapshot (scripts/build_seed.py) rather
+    than needing to fetch anything live - confirmed directly that Streamlit
+    Cloud's shared IP gets rate-limited independent of our own request
+    pattern, so this is what makes the deployed app reliable at all.
+    """
+    seed_dir = tmp_path / "seed"
+    seed_dir.mkdir()
+    pd.DataFrame({"ticker": ["AAPL"], "sector": ["Information Technology"]}).to_parquet(
+        seed_dir / "sp500_tickers.parquet"
+    )
+    pd.DataFrame(
+        {"date": pd.to_datetime(["2020-01-02"]), "ticker": ["AAPL"], "adj_close": [100.0]}
+    ).to_parquet(seed_dir / "prices.parquet")
+    pd.DataFrame(
+        {"date": pd.to_datetime(["2020-01-15"]), "ticker": ["AAPL"], "dividend_amount": [0.2]}
+    ).to_parquet(seed_dir / "dividends.parquet")
+    pd.DataFrame(
+        {"date": pd.to_datetime(["2020-01-02"]), "risk_free_rate_annual": [0.015]}
+    ).to_parquet(seed_dir / "risk_free_rate.parquet")
+
+    db_path = tmp_path / "cache" / "portfolio.duckdb"
+    with patch("src.data.storage.config.SEED_DIR", seed_dir), patch(
+        "src.data.storage.config.DUCKDB_PATH", db_path
+    ):
+        conn = storage.get_connection()  # path=None -> default path -> seed loading fires
+
+        assert storage.sp500_tickers_cached(conn) == ["AAPL"]
+        prices = storage.query_prices(conn, ["AAPL"], date(2020, 1, 1), date(2020, 1, 31))
+        assert prices["adj_close"].iloc[0] == 100.0
+        assert len(storage.query_dividends(conn, ["AAPL"], date(2020, 1, 1), date(2020, 1, 31))) == 1
+        assert storage.risk_free_rate_covered(conn, date(2020, 1, 1), date(2020, 1, 2)) is True
+        # Seeded data counts as already covered - no refetch needed for it.
+        assert storage.tickers_needing_fetch(conn, "prices", ["AAPL"], config.DATA_START_DATE, date(2020, 1, 2)) == []
+        conn.close()
+
+
+def test_get_connection_skips_seed_loading_when_no_seed_is_committed(tmp_path):
+    """Local dev before scripts/build_seed.py has ever been run - loading a
+    non-existent seed must be a silent no-op, not an error.
+    """
+    db_path = tmp_path / "cache" / "portfolio.duckdb"
+    with patch("src.data.storage.config.SEED_DIR", tmp_path / "no_seed_here"), patch(
+        "src.data.storage.config.DUCKDB_PATH", db_path
+    ):
+        conn = storage.get_connection()
+        assert storage.sp500_tickers_cached(conn) == []
+        conn.close()
