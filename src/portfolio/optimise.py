@@ -20,7 +20,7 @@ def max_sharpe_weights(
 
     Covariance is estimated with Ledoit-Wolf shrinkage rather than the raw
     sample covariance: with only a few years of daily data, the raw sample
-    covariance matrix is noisy, and shrinkage pulls it toward a more stable,
+    covariance matrix is noisy, and shrinkage pulls it towards a more stable,
     structured estimate. Never break this rule (rule 4) — there is
     no code path here using raw sample covariance.
     """
@@ -59,7 +59,7 @@ def _cap_and_redistribute(weights: dict[str, float], max_weight: float) -> dict[
 def risk_parity_weights(prices: pd.DataFrame, risk_free_rate: float | None = None) -> dict[str, float]:
     """Weights such that every holding contributes equally to total
     portfolio risk (Equal Risk Contribution), rather than being weighted
-    toward the best *estimated* returns the way max_sharpe_weights is —
+    towards the best *estimated* returns the way max_sharpe_weights is —
     return estimates are noisy, so risk parity sidesteps them entirely and
     balances risk contributions instead.
 

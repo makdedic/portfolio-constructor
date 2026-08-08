@@ -108,7 +108,7 @@ def expected_shortfall(daily_returns: pd.Series, confidence: float) -> float:
 
 
 def var_breaches(daily_returns: pd.Series, confidence: float) -> int:
-    """Count of days where the realized loss exceeded the stated historical VaR.
+    """Count of days where the realised loss exceeded the stated historical VaR.
 
     This is literally how banks backtest their own VaR models: if a 95% VaR
     is breached on far more than 5% of days, the model is understating risk.

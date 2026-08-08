@@ -61,7 +61,7 @@ def compute_momentum(prices: pd.DataFrame, as_of_date) -> pd.Series:
 
 
 def compute_low_volatility(prices: pd.DataFrame, as_of_date) -> pd.Series:
-    """Trailing 12-month realized daily-return volatility.
+    """Trailing 12-month realised daily-return volatility.
 
     Lower volatility stocks are the "low-vol" factor bet: historically they
     have delivered better risk-adjusted returns than their beta would predict.

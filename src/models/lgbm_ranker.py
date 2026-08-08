@@ -4,7 +4,7 @@ trained fresh at every rebalance on a rolling panel of historical examples.
 Every example has the same three inputs (features) as the composite
 ranker in ranker.py — momentum, low_volatility, dividend_yield — paired
 with what forward_return turned out to be historically (the label: the
-realized return over the following month, only ever knowable in
+realised return over the following month, only ever knowable in
 hindsight). Training teaches the model a relationship between those three
 inputs and what actually happened next; predicting for the real, current
 as_of_date feeds it the same three inputs (never forward_return, which

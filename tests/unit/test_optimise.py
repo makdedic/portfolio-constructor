@@ -32,7 +32,7 @@ def test_ledoit_wolf_shrinks_every_covariance_toward_zero():
     shrunk_off_diagonal = shrunk_covariance.to_numpy()[off_diagonal_mask]
 
     # Ledoit-Wolf shrinkage pulls every off-diagonal covariance strictly
-    # toward zero, so its magnitude must be strictly smaller than the raw
+    # towards zero, so its magnitude must be strictly smaller than the raw
     # sample estimate's — this is rule 4.
     assert np.all(np.abs(shrunk_off_diagonal) < np.abs(raw_off_diagonal))
 
