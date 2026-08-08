@@ -27,8 +27,8 @@ Built in two passes: Pass 1 was a thin vertical slice (every stage
 connected end-to-end, on a small dev universe, to prove the six rules
 above hold in full before adding breadth); Pass 2 added the remaining
 depth — a second ranker and optimiser, real market data in place of
-placeholders, the full S&P 500 as an available universe, orchestration,
-and proper storage. Both passes are complete.
+placeholders, the full S&P 500 as an available universe, and proper
+storage. Both passes are complete.
 
 - **Ingestion** (`src/data/ingest.py`, `src/data/storage.py`) — daily
   prices + dividends via yfinance, the risk-free rate via FRED, S&P 500
@@ -77,13 +77,13 @@ and proper storage. Both passes are complete.
   (every Pass 2 addition demonstrated and compared against the Pass 1
   baseline, including the full S&P 500 universe run)
 
-**What the default pipeline/dashboard actually run**, to be precise: `app.py`
-and a bare `pipeline.run_pipeline()` call use the composite ranker, max-Sharpe
+**What runs by default**, to be precise: `app.py` on first load, and a bare
+`pipeline.run_pipeline()` call, both use the composite ranker, max-Sharpe
 optimiser, the ~39-ticker dev universe, and a flat 2% risk-free rate — the
-fast, simple configuration. LightGBM, risk-parity, the full S&P 500 universe,
-and the real FRED rate are all built, tested, and demonstrated in
-`03_pass2_exploration.ipynb`, but wiring them up as the pipeline/dashboard's
-*default* is a deliberately separate, not-yet-done step (see Configuration).
+fast, simple configuration. Every other combination — LightGBM, risk-parity,
+the full S&P 500 universe, the real FRED rate, and any mix of them — is a
+sidebar control away in the dashboard, or an argument away in
+`pipeline.run_pipeline(...)` (see Configuration).
 
 **Explicitly out of scope**: a fundamentals-based quality factor (ROE,
 leverage, earnings quality). Investigated — yfinance's fundamentals data
@@ -136,24 +136,80 @@ results["risk_comparison"]
 ```
 
 **A non-default configuration** — e.g. LightGBM + risk-parity + the full
-S&P 500, the way `03_pass2_exploration.ipynb` demonstrates — by calling
-`backtest.run_backtest` directly rather than through `pipeline.run_pipeline`:
+S&P 500 + the real FRED rate, the way `03_pass2_exploration.ipynb`
+demonstrates — by passing different arguments to `pipeline.run_pipeline`:
 
 ```python
-from src.data import ingest
+from src.data import ingest, pipeline
 from src.models import lgbm_ranker
-from src.portfolio import backtest, optimise
-from src import config
+from src.portfolio import optimise
 
 tickers = ingest.load_or_fetch_sp500_tickers()
-prices_long = ingest.load_or_fetch_prices(tickers + [config.BENCHMARK_TICKER], config.DATA_START_DATE, config.DATA_END_DATE)
-dividends = ingest.load_or_fetch_dividends(tickers, config.DATA_START_DATE, config.DATA_END_DATE)
-prices = ingest.to_wide_adj_close(prices_long)
-
-daily_returns, rebalance_log = backtest.run_backtest(
-    prices, dividends, tickers=tickers, rank_fn=lgbm_ranker.rank_by_lgbm, optimiser_fn=optimise.risk_parity_weights
+results = pipeline.run_pipeline(
+    tickers=tickers,
+    rank_fn=lgbm_ranker.rank_by_lgbm,
+    optimiser_fn=optimise.risk_parity_weights,
+    use_real_risk_free_rate=True,
 )
 ```
+
+## Deployment
+
+The dashboard runs on Streamlit Community Cloud. Getting it to work
+reliably there surfaced real production issues that a local dev loop never
+would have — worth documenting honestly rather than glossing over:
+
+- **Yahoo rate-limits Streamlit Cloud's shared IP, independent of request
+  volume.** Confirmed directly: even the small ~39-ticker default failed
+  with `YFRateLimitError` after exhausting retries, on an IP this app's own
+  traffic alone wouldn't come close to tripping. Two mitigations, neither a
+  full guarantee against a determined block: prices and dividends both
+  fetch through one batched, retried `yf.download()` call
+  (`ingest._download_with_retry`) instead of hundreds of fragile
+  per-ticker requests, and that response is validated before it's trusted
+  — `yf.download()` can silently return an all-NaN column for a ticker
+  with no exception raised at all (confirmed directly against a real
+  corrupted fetch), so a wholly-empty ticker triggers a retry instead of
+  getting cached as if it were real data.
+- **The deployed app ships with a pre-fetched data snapshot** (`data/seed/`,
+  built by `scripts/build_seed.py`) so it starts already warm instead of
+  needing to fetch anything live on a fresh deploy. If a live "top-up"
+  fetch to reach today's date fails, `ingest.load_or_fetch_prices` /
+  `load_or_fetch_dividends` fall back to whatever's already cached instead
+  of crashing — the app shows real data, just not current as of today.
+  Trade-off: the deployed data is only as fresh as the last time the seed
+  was rebuilt and redeployed, not automatically kept current. To refresh
+  it:
+
+  ```bash
+  python scripts/build_seed.py
+  git add data/seed/
+  git commit -m "chore: refresh seed data"
+  git push
+  ```
+
+- **DuckDB connections are always explicitly closed** (`with
+  storage.get_connection() as conn:` in every `ingest.py` caller).
+  Streamlit keeps one Python process running across every user
+  interaction, unlike a short-lived script — a connection left open by an
+  interrupted run doesn't get cleaned up by the process exiting, and can
+  outlive it long enough to collide with the next run's own write. DuckDB
+  allows only one writer per file; confirmed directly in production as a
+  `TransactionException` write-write conflict before this fix.
+- **No orchestration framework runs in the deployed path.** This was
+  originally a Prefect flow; Prefect's own local orchestration server
+  turned out to be the actual source of the worst deployment failures — an
+  ephemeral-server startup timeout, a port collision with a botched
+  shutdown, and a sluggish, unresponsive UI while it managed its own async
+  lifecycle inside Streamlit's long-running process — all for
+  retry/concurrency behaviour `ingest.py` already provides on its own.
+  `pipeline.py` now calls the same ingest/backtest/metrics functions
+  directly, with a plain `ThreadPoolExecutor` for the two concurrent
+  fetches.
+- **Tests run automatically on every push and pull request**
+  (`.github/workflows/tests.yml`), against a clean install from
+  `requirements.txt` — verified directly in a fresh virtualenv, not just
+  assumed to work.
 
 ## Configuration
 
@@ -182,10 +238,15 @@ portfolio-constructor/
 │   └── risk/
 │       └── metrics.py        # Sharpe, Sortino, drawdown, VaR, CVaR, breaches
 ├── app.py                    # Streamlit dashboard
+├── scripts/
+│   └── build_seed.py         # rebuilds data/seed/ - run whenever deployed data should refresh
 ├── notebooks/
 │   ├── 01_pass1_exploration.ipynb
 │   ├── 02_sortino_optimisation_experiment.ipynb
 │   └── 03_pass2_exploration.ipynb
 ├── tests/unit/                # fast, offline, synthetic-data tests
-└── data/cache/                # gitignored DuckDB cache (created on first run)
+├── .github/workflows/tests.yml  # runs tests/unit on every push and pull request
+└── data/
+    ├── seed/                  # committed S&P 500 snapshot - ships with the deployed app
+    └── cache/                 # gitignored local DuckDB cache (created on first run)
 ```
