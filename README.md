@@ -91,6 +91,40 @@ doesn't go back far enough for this project's backtest range; SEC EDGAR's
 XBRL API would be the proper free source if ever revisited — but skipped as
 not worth the lift for what it would add here.
 
+## Limitations
+
+Where these results should and shouldn't be trusted:
+
+- **Survivorship bias** — the S&P 500 universe uses today's constituent
+  list applied retroactively across the whole 2015-2026 backtest.
+  Companies removed from the index over that period (usually because they
+  performed badly) never appear as candidates, which flatters the
+  full-universe results more than the headline numbers alone suggest.
+- **One historical path** — the backtest runs once over a single realised
+  sequence of market history, not resampled or stress-tested against
+  alternate scenarios. Results reflect how this specific decade played
+  out, not necessarily how the strategy would perform across market
+  regimes in general.
+- **Weights held fixed between rebalances** — positions drift with price
+  and aren't corrected until the next monthly rebalance rather than
+  managed continuously. This is a chosen simplification and is a
+  gap from how the strategy would actually trade.
+- **Simplified transaction costs** — a flat 10bps per rebalance regardless
+  of trade size or liquidity, with no market impact or bid-ask spread
+  modelling. Real execution costs for a less liquid holding would be
+  worse than this accounts for.
+- **Small per-fit training data for LightGBM** — each monthly refit sees
+  roughly 1,000-1,300 rows (~39 tickers × ~30 monthly snapshots).
+  Hyperparameters are kept conservative specifically because of this, but
+  a model refit on that little data every month is still genuinely prone
+  to noisy, unstable predictions.
+- **Iterative development risk** — the backtest start date was adjusted
+  partway through development after checking which tickers a given date
+  would include, not fixed beforehand. Several rankers and
+  optimisers were also compared on the same backtest window, and the
+  best-performing combination (LightGBM on the full S&P 500) is the one
+  most prominently reported.
+
 ## Setup
 
 ```bash
