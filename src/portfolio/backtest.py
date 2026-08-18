@@ -198,13 +198,19 @@ def run_backtest(
     (e.g. from ingest.load_or_fetch_risk_free_rate), or None to fall back
     to the flat config.RISK_FREE_RATE_ANNUAL constant.
 
-    tickers without a complete price history across the whole prices range
-    (too young to exist for the full backtest, e.g. an IPO or spinoff after
-    it starts) are excluded automatically — see features.tickers_with_complete_history.
+    tickers without a complete price history through end (too young to exist
+    for the full backtest, e.g. an IPO or spinoff after it starts) are
+    excluded automatically — see features.tickers_with_complete_history.
+    Checked only through end, not through however far prices happens to
+    extend: prices is typically fetched through today for the training
+    window's own lookback needs, and today's trailing day or two is often
+    still NaN (not yet settled) - checking completeness past end would
+    incorrectly exclude a ticker for a gap the backtest never actually
+    looks at.
     """
     start, end = pd.Timestamp(start), pd.Timestamp(end)
     universe_prices = prices[tickers]
-    usable_tickers = features.tickers_with_complete_history(universe_prices)
+    usable_tickers = features.tickers_with_complete_history(universe_prices.loc[:end])
     universe_prices = universe_prices[usable_tickers]
     benchmark_prices = prices[benchmark_ticker]
 
