@@ -91,6 +91,49 @@ doesn't go back far enough for this project's backtest range; SEC EDGAR's
 XBRL API would be the proper free source if ever revisited — but skipped as
 not worth the lift for what it would add here.
 
+## Methodology
+
+The mathematics behind the three components most worth understanding line by line:
+
+- **Mean-variance max-Sharpe** (`optimise.max_sharpe_weights`) finds the
+  weights `w` that maximise `(w'μ − r_f) / sqrt(w'Σw)` — expected portfolio
+  return in excess of the risk-free rate `r_f`, divided by portfolio
+  volatility. `μ` is each stock's expected return (here, trailing historical
+  average); `Σ` is the covariance matrix between every pair of stocks, so
+  `w'Σw` (portfolio variance) captures diversification, not just each
+  stock's own volatility. With only a few years of daily data, the raw
+  sample covariance matrix has too many pairwise terms to estimate reliably
+  and comes out noisy — Ledoit-Wolf shrinkage blends it with a simpler,
+  more stable target matrix, trading a small amount of bias for a
+  meaningful cut in estimation error. Weights are also capped at
+  `MAX_WEIGHT_PER_STOCK` so the optimiser can't concentrate everything into
+  one name.
+- **Risk parity / Equal Risk Contribution** (`optimise.risk_parity_weights`)
+  never looks at expected returns at all. A stock's contribution to total
+  portfolio risk is `w_i × (Σw)_i` — its weight times how much it co-moves
+  with the rest of the portfolio — and "equal risk contribution" means
+  solving for weights where that quantity is the same for every holding, so
+  no single stock dominates the portfolio's variance regardless of its raw
+  weight. It's solved via the standard convex reformulation (Maillard,
+  Roncalli & Teiletche, 2010) — minimising `0.5 w'Σw − Σ ln(w_i)` over
+  `w > 0` — whose own optimum works out algebraically to that same
+  equal-risk-contribution condition, so a convex, easy-to-solve problem
+  stands in for the harder direct one.
+- **VaR and CVaR** (`risk/metrics.py`) each answer "how bad could a day
+  get," differently. Historical VaR at 95% confidence is just the 5th
+  percentile of the *actual* historical daily returns — the loss level
+  breached on 5% of real trading days, no assumption about the shape of the
+  distribution. Monte Carlo VaR instead fits a normal distribution to the
+  historical mean and standard deviation, draws 10,000 simulated daily
+  returns from it, and reads the same percentile off the simulated data —
+  smoother, but only as good as the assumption that returns are actually
+  normally distributed (real markets have fatter tails than a normal curve
+  predicts). CVaR (Expected Shortfall) goes one step further: instead of
+  the threshold loss at that percentile, it's the *average* loss on every
+  day that breaches it — "given a bad day happened, how bad was it on
+  average," which matters more than the threshold alone in an actual tail
+  event.
+
 ## Limitations
 
 Where these results should and shouldn't be trusted:
