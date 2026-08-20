@@ -134,6 +134,25 @@ The mathematics behind the three components most worth understanding line by lin
   average," which matters more than the threshold alone in an actual tail
   event.
 
+**What these actually produce**, whole-backtest Sharpe (2015-2026, net of
+costs, `03_pass2_exploration.ipynb`):
+
+| Strategy | Sharpe |
+|---|---|
+| Equal-weight | 1.02 |
+| Momentum-only | 0.98 |
+| LightGBM | 0.91 |
+| Risk-parity (composite ranker) | 0.80 |
+| Composite (default, max-Sharpe) | 0.79 |
+| SPY (benchmark) | 0.72 |
+
+Every variant beats SPY on a risk-adjusted basis — but equal-weight, the
+simplest possible baseline, has the *highest* Sharpe of all of them here.
+Worth stating plainly rather than only showcasing the more sophisticated
+variants: none of this project's ranking or optimisation machinery
+reliably beats "just hold everything at the same weight," at least not on
+this specific universe and backtest window.
+
 ## Limitations
 
 Where these results should and shouldn't be trusted:
