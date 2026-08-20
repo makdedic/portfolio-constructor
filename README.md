@@ -102,9 +102,16 @@ Where these results should and shouldn't be trusted:
   full-universe results more than the headline numbers alone suggest.
 - **One historical path** — the backtest runs once over a single realised
   sequence of market history, not resampled or stress-tested against
-  alternate scenarios. Results reflect how this specific decade played
-  out, not necessarily how the strategy would perform across market
-  regimes in general.
+  alternate scenarios. Split into three regimes to check this
+  directly (`03_pass2_exploration.ipynb`, section 11): the strategy's
+  Sharpe beats SPY's in the calm 2015-2019 bull market, the 2020-2021
+  COVID crash and recovery, and the 2022 rate-hike bear market and
+  recovery alike. However, the margin varies a lot (+0.09
+  Sharpe in 2015-2019 vs +0.02, barely distinguishable, during COVID), and
+  in 2022-2026 the strategy's raw annualised return was actually slightly
+  *below* SPY's despite the higher Sharpe. "Consistently ahead by a
+  varying, sometimes small margin" is the honest summary — not "beats the
+  market."
 - **Weights held fixed between rebalances** — positions drift with price
   and aren't corrected until the next monthly rebalance rather than
   managed continuously. This is a chosen simplification and is a
