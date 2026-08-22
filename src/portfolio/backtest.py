@@ -29,6 +29,17 @@ def _turnover(old_weights: dict, new_weights: dict) -> float:
     return sum(abs(new_weights.get(ticker, 0.0) - old_weights.get(ticker, 0.0)) for ticker in tickers)
 
 
+def _transaction_cost(turnover: float) -> float:
+    """Cost of trading turnover (as a fraction of portfolio value, same
+    units _turnover returns) — a flat per-rebalance rate plus a size-aware
+    surcharge that grows with the square root of turnover, not turnover
+    itself, matching how real market impact scales (see
+    config.MARKET_IMPACT_BPS_PER_SQRT_TURNOVER).
+    """
+    cost_rate_bps = config.TRANSACTION_COST_BPS + config.MARKET_IMPACT_BPS_PER_SQRT_TURNOVER * turnover**0.5
+    return turnover * cost_rate_bps / 10_000
+
+
 def _period_returns(period_prices: pd.DataFrame, weights: dict) -> tuple[pd.Series, dict]:
     """Daily portfolio returns while holding fixed weights over one period.
 
@@ -109,7 +120,7 @@ def _run_rebalanced_series(
 
         target_weights = get_target_weights(rebalance_date)
         turnover = _turnover(previous_weights, target_weights)
-        cost = turnover * config.TRANSACTION_COST_BPS / 10_000
+        cost = _transaction_cost(turnover)
 
         period_prices = universe_prices.loc[
             (universe_prices.index >= rebalance_date) & (universe_prices.index <= period_end)
@@ -168,7 +179,7 @@ def _benchmark_returns(
     period_prices = benchmark_prices.loc[(benchmark_prices.index >= start) & (benchmark_prices.index <= end)]
     gross_returns = period_prices.pct_change().fillna(0.0)
 
-    entry_cost = 1.0 * config.TRANSACTION_COST_BPS / 10_000  # buying from cash is 100% turnover
+    entry_cost = _transaction_cost(1.0)  # buying from cash is 100% turnover
     net_returns = gross_returns.copy()
     net_returns.iloc[0] -= entry_cost
     return gross_returns, net_returns

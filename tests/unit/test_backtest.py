@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 from pypfopt import exceptions as pypfopt_exceptions
 
+from src import config
 from src.models import lgbm_ranker
 from src.portfolio import backtest, optimise
 
@@ -77,6 +78,26 @@ def test_transaction_cost_matches_turnover_exactly():
 def test_zero_turnover_means_no_cost():
     weights = {"A": 0.6, "B": 0.4}
     assert backtest._turnover(weights, weights) == pytest.approx(0.0)
+
+
+def test_transaction_cost_matches_the_documented_formula():
+    turnover = 0.25
+    cost_rate_bps = config.TRANSACTION_COST_BPS + config.MARKET_IMPACT_BPS_PER_SQRT_TURNOVER * turnover**0.5
+    expected = turnover * cost_rate_bps / 10_000
+    assert backtest._transaction_cost(turnover) == pytest.approx(expected)
+
+
+def test_zero_turnover_costs_nothing():
+    assert backtest._transaction_cost(0.0) == pytest.approx(0.0)
+
+
+def test_bigger_rebalances_cost_more_per_dollar_traded():
+    # Real market impact: a rebalance that trades more should cost more
+    # per dollar traded, not just proportionally more overall - this is
+    # what distinguishes the sqrt(turnover) surcharge from a flat rate.
+    small_rate = backtest._transaction_cost(0.1) / 0.1
+    large_rate = backtest._transaction_cost(0.8) / 0.8
+    assert large_rate > small_rate
 
 
 def test_net_returns_equal_gross_minus_cost_on_rebalance_day():

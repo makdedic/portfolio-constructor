@@ -60,7 +60,17 @@ DATA_END_DATE = date.today()
 REBALANCE_FREQUENCY = "ME"  # month-end, pandas offset alias
 TOP_N_HOLDINGS = 15  # stocks selected by the ranker before optimisation
 MAX_WEIGHT_PER_STOCK = 0.15  # optimiser bound, avoids single-name concentration
-TRANSACTION_COST_BPS = 10  # per rebalance, applied to traded notional (turnover)
+TRANSACTION_COST_BPS = 10  # flat per-rebalance rate, applied to traded notional (turnover)
+
+# A flat rate alone ignores market impact: the effect of your own order
+# moving the price against you, which grows with trade size relative to
+# how much of that stock normally trades. Real market impact research
+# finds this cost scales roughly with the square root of trade size, not
+# linearly with it - so a rebalance that trades twice as much costs more
+# per dollar traded, not just proportionally more overall. This surcharge
+# rate (in bps) is multiplied by sqrt(turnover) and added to the flat rate
+# above - see backtest._transaction_cost.
+MARKET_IMPACT_BPS_PER_SQRT_TURNOVER = 10
 
 # --- Alpha factor lookback windows -------------------------------------------
 MOMENTUM_LOOKBACK_MONTHS = 12
