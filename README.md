@@ -135,23 +135,29 @@ The mathematics behind the three components most worth understanding line by lin
   event.
 
 **What these actually produce**, whole-backtest Sharpe (2015-2026, net of
-costs, `03_pass2_exploration.ipynb`):
+costs including the size-aware surcharge above, `03_pass2_exploration.ipynb`):
 
 | Strategy | Sharpe |
 |---|---|
-| Equal-weight | 1.02 |
-| Momentum-only | 0.98 |
-| LightGBM | 0.91 |
-| Risk-parity (composite ranker) | 0.80 |
-| Composite (default, max-Sharpe) | 0.79 |
+| Equal-weight | 0.97 |
+| Momentum-only | 0.91 |
+| LightGBM | 0.73 |
 | SPY (benchmark) | 0.72 |
+| Risk-parity (composite ranker) | 0.70 |
+| Composite (default, max-Sharpe) | 0.65 |
 
-Every variant beats SPY on a risk-adjusted basis — but equal-weight, the
-simplest possible baseline, has the *highest* Sharpe of all of them here.
-Worth stating plainly rather than only showcasing the more sophisticated
-variants: none of this project's ranking or optimisation machinery
-reliably beats "just hold everything at the same weight," at least not on
-this specific universe and backtest window.
+Worth stating plainly rather than only showcasing the flattering numbers:
+equal-weight and momentum-only clearly beat SPY, and LightGBM edges it out
+narrowly, but **the actual default configuration of this project — the
+composite ranker with max-Sharpe optimisation — does not beat a
+buy-and-hold SPY position** on a risk-adjusted basis, and neither does
+risk-parity. This isn't simply "high-turnover strategies get punished
+harder": risk-parity has the *lowest* turnover and lowest total cost of
+the four active strategies here, yet still underperforms — its edge over
+SPY was thin even before the cost model above was made more realistic.
+None of this project's ranking or optimisation machinery reliably beats
+"just hold everything at the same weight," at least not on this specific
+universe and backtest window.
 
 ## Limitations
 
@@ -164,16 +170,19 @@ Where these results should and shouldn't be trusted:
   full-universe results more than the headline numbers alone suggest.
 - **One historical path** — the backtest runs once over a single realised
   sequence of market history, not resampled or stress-tested against
-  alternate scenarios. Split into three regimes to check this
-  directly (`03_pass2_exploration.ipynb`, section 11): the strategy's
-  Sharpe beats SPY's in the calm 2015-2019 bull market, the 2020-2021
-  COVID crash and recovery, and the 2022 rate-hike bear market and
-  recovery alike. However, the margin varies a lot (+0.09
-  Sharpe in 2015-2019 vs +0.02, barely distinguishable, during COVID), and
-  in 2022-2026 the strategy's raw annualised return was actually slightly
-  *below* SPY's despite the higher Sharpe. "Consistently ahead by a
-  varying, sometimes small margin" is the honest summary — not "beats the
-  market."
+  alternate scenarios. Split into three regimes to check this directly
+  (`03_pass2_exploration.ipynb`, section 11): the default strategy's Sharpe
+  is *below* SPY's in all three — 0.68 vs 0.79 in the calm 2015-2019 bull
+  market, 0.81 vs 0.88 through the COVID crash and recovery, 0.59 vs 0.62
+  through the 2022 rate-hike bear market and recovery. That's a real
+  reversal from an earlier version of this check, which found the
+  opposite conclusion — the difference is the transaction cost model
+  becoming more realistic (see Methodology), not a change to the
+  underlying strategy. The default configuration's edge over SPY was thin
+  enough that a fuller accounting of trading costs erases it entirely,
+  consistently across all three regimes rather than just one. A useful
+  reminder of how sensitive a backtest's conclusion can be to a single
+  modelling assumption, and why this section exists.
 - **Weights held fixed between rebalances** — positions drift with price
   and aren't corrected until the next monthly rebalance rather than
   managed continuously. This is a chosen simplification and is a
