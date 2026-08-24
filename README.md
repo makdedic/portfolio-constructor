@@ -159,6 +159,26 @@ None of this project's ranking or optimisation machinery reliably beats
 "just hold everything at the same weight," at least not on this specific
 universe and backtest window.
 
+**Why**, broken out gross vs net of costs — it isn't one story:
+
+| Strategy | Gross Sharpe | Net Sharpe | Cost drag |
+|---|---|---|---|
+| SPY | 0.72 | 0.72 | 0.00 |
+| Composite (default) | 0.72 | 0.65 | 0.07 |
+| Risk-parity | 0.74 | 0.71 | 0.04 |
+| LightGBM | 0.83 | 0.73 | 0.10 |
+| Momentum-only | 0.96 | 0.91 | 0.05 |
+
+Composite and risk-parity barely beat SPY *even before costs* — their
+gross Sharpe is essentially tied with SPY's, not genuinely ahead, so this
+isn't a costs problem at all: the ranking and optimisation aren't adding
+real value here in the first place. LightGBM is the opposite: its gross
+Sharpe clearly beats SPY, so the stock-picking genuinely works — but it
+also has by far the highest turnover of any strategy here, so it pays the
+largest cost drag and ends up with only a bare net edge. Momentum-only is
+the one variant where a real edge survives intact: clearly ahead gross,
+and still comfortably ahead net.
+
 ## Limitations
 
 Where these results should and shouldn't be trusted:
