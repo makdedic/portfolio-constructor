@@ -207,10 +207,16 @@ Where these results should and shouldn't be trusted:
   and aren't corrected until the next monthly rebalance rather than
   managed continuously. This is a chosen simplification and is a
   gap from how the strategy would actually trade.
-- **Simplified transaction costs** — a flat 10bps per rebalance regardless
-  of trade size or liquidity, with no market impact or bid-ask spread
-  modelling. Real execution costs for a less liquid holding would be
-  worse than this accounts for.
+- **Transaction costs still aren't liquidity-aware** — costs used to be a
+  flat 10bps per rebalance regardless of trade size; fixed to scale with
+  the square root of total portfolio turnover instead (see Methodology),
+  a real improvement. What's still missing: it's one universe-wide
+  surcharge, not a per-ticker one — a trade in a highly liquid mega-cap
+  and a same-sized trade in a thinly-traded small-cap are charged
+  identically, since the model has no notion of any individual stock's
+  own trading volume. Real execution costs for a less liquid holding are
+  still understated, and there's no explicit bid-ask spread component
+  either.
 - **Small per-fit training data for LightGBM** — each monthly refit sees
   roughly 1,000-1,300 rows (~39 tickers × ~30 monthly snapshots).
   Hyperparameters are kept conservative specifically because of this, but
