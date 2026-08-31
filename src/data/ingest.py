@@ -209,6 +209,37 @@ def fetch_sp500_constituents() -> pd.DataFrame:
     return table.sort_values("ticker").reset_index(drop=True)
 
 
+def fetch_sp500_historical_changes() -> pd.DataFrame:
+    """Every historical addition/removal from the S&P 500 index, scraped
+    from Wikipedia: effective_date, added_ticker, removed_ticker.
+
+    Lets load_or_fetch_sp500_tickers reconstruct point-in-time membership
+    (see reconstruct_sp500_membership) instead of only ever offering
+    today's constituent list. match="Effective Date" targets the table by
+    its header, same reasoning as fetch_sp500_constituents' match="Symbol".
+    The page has two separate "Ticker" columns (one under "Added", one
+    under "Removed") - selected by their full (group, column) pair, not a
+    flattened name, so they aren't ambiguous. Rows for changes that
+    haven't happened yet are dropped - confirmed directly that Wikipedia
+    lists announced-but-not-yet-effective changes.
+    """
+    response = requests.get(
+        config.SP500_HISTORICAL_CHANGES_WIKIPEDIA_URL, headers={"User-Agent": "Mozilla/5.0"}
+    )
+    response.raise_for_status()
+    tables = pd.read_html(io.StringIO(response.text), match="Effective Date")
+    raw = tables[0]
+    changes = pd.DataFrame(
+        {
+            "effective_date": pd.to_datetime(raw[("Effective Date", "Effective Date")], errors="coerce"),
+            "added_ticker": raw[("Added", "Ticker")].str.replace(".", "-", regex=False),
+            "removed_ticker": raw[("Removed", "Ticker")].str.replace(".", "-", regex=False),
+        }
+    )
+    changes = changes[changes["effective_date"] <= pd.Timestamp(date.today())]
+    return changes.sort_values("effective_date").reset_index(drop=True)
+
+
 def fetch_sp500_tickers() -> list[str]:
     """Just the ticker symbols, for callers that don't need sector info."""
     return fetch_sp500_constituents()["ticker"].tolist()

@@ -56,6 +56,11 @@ def get_connection(path: Path | None = None) -> duckdb.DuckDBPyConnection:
     # existed - a no-op on an already-current or freshly created table.
     conn.execute("ALTER TABLE sp500_tickers ADD COLUMN IF NOT EXISTS sector VARCHAR")
     conn.execute(
+        """CREATE TABLE IF NOT EXISTS sp500_historical_changes (
+            effective_date DATE, added_ticker VARCHAR, removed_ticker VARCHAR
+        )"""
+    )
+    conn.execute(
         """CREATE TABLE IF NOT EXISTS fetch_log (
             dataset VARCHAR, ticker VARCHAR, start_date DATE, end_date DATE,
             fetched_at TIMESTAMP, PRIMARY KEY (dataset, ticker, start_date, end_date)
@@ -241,3 +246,26 @@ def replace_sp500_constituents(conn: duckdb.DuckDBPyConnection, constituents: pd
     conn.register("_constituents", constituents)
     conn.execute("INSERT INTO sp500_tickers (ticker, sector) SELECT ticker, sector FROM _constituents")
     conn.unregister("_constituents")
+
+
+def sp500_historical_changes_cached(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
+    """The cached S&P 500 addition/removal log, or an empty DataFrame if
+    never fetched - wholesale refresh-if-empty, same pattern as
+    sp500_tickers_cached.
+    """
+    return conn.execute(
+        "SELECT effective_date, added_ticker, removed_ticker FROM sp500_historical_changes"
+    ).fetchdf()
+
+
+def replace_sp500_historical_changes(conn: duckdb.DuckDBPyConnection, changes: pd.DataFrame) -> None:
+    """changes: an effective_date, added_ticker, removed_ticker DataFrame
+    (see ingest.fetch_sp500_historical_changes).
+    """
+    conn.execute("DELETE FROM sp500_historical_changes")
+    conn.register("_changes", changes)
+    conn.execute(
+        """INSERT INTO sp500_historical_changes (effective_date, added_ticker, removed_ticker)
+           SELECT effective_date, added_ticker, removed_ticker FROM _changes"""
+    )
+    conn.unregister("_changes")

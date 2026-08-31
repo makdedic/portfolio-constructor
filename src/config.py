@@ -94,6 +94,9 @@ RISK_FREE_RATE_FRED_SERIES = "DTB3"  # 3-month T-bill, secondary market rate
 
 # --- S&P 500 universe (full, optional) ----------------------------------------
 SP500_WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+SP500_HISTORICAL_CHANGES_WIKIPEDIA_URL = (
+    "https://en.wikipedia.org/wiki/Historical_components_of_the_S%26P_500"
+)
 
 # Retry-with-backoff for yf.download() (prices and dividends both route
 # through it - see src/data/ingest.py's _download_with_retry) if Yahoo

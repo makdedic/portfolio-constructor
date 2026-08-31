@@ -123,6 +123,36 @@ def test_sp500_tickers_cache_hit_and_miss(conn):
     assert storage.sp500_tickers_cached(conn) == ["AAPL", "MSFT"]
 
 
+def test_sp500_historical_changes_cache_hit_and_miss(conn):
+    assert storage.sp500_historical_changes_cached(conn).empty
+
+    changes = pd.DataFrame(
+        {
+            "effective_date": [date(2020, 1, 1), date(2020, 6, 1)],
+            "added_ticker": ["AAA", None],
+            "removed_ticker": ["BBB", "CCC"],
+        }
+    )
+    storage.replace_sp500_historical_changes(conn, changes)
+
+    cached = storage.sp500_historical_changes_cached(conn)
+    assert cached["added_ticker"].iloc[0] == "AAA"
+    assert pd.isna(cached["added_ticker"].iloc[1])
+    assert cached["removed_ticker"].tolist() == ["BBB", "CCC"]
+
+
+def test_replace_sp500_historical_changes_overwrites_the_previous_set(conn):
+    storage.replace_sp500_historical_changes(
+        conn, pd.DataFrame({"effective_date": [date(2020, 1, 1)], "added_ticker": ["AAA"], "removed_ticker": ["BBB"]})
+    )
+    storage.replace_sp500_historical_changes(
+        conn, pd.DataFrame({"effective_date": [date(2021, 1, 1)], "added_ticker": ["CCC"], "removed_ticker": ["DDD"]})
+    )
+
+    cached = storage.sp500_historical_changes_cached(conn)
+    assert cached["added_ticker"].tolist() == ["CCC"]
+
+
 def test_sp500_sectors_cached_excludes_unknown_tickers_rather_than_erroring(conn):
     constituents = pd.DataFrame(
         {"ticker": ["AAPL", "JPM"], "sector": ["Information Technology", "Financials"]}

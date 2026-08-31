@@ -56,6 +56,69 @@ def test_fetch_sp500_constituents_captures_ticker_and_sector():
     }
 
 
+def _fake_sp500_changes_response(rows: list[dict]) -> str:
+    """A minimal HTML table shaped like Wikipedia's real "Historical
+    components of the S&P 500" table - two-level columns (e.g. ("Added",
+    "Ticker")), just enough for pd.read_html(..., match="Effective Date")
+    and fetch_sp500_historical_changes' (group, column) selection to work
+    the same way they do on the real page.
+
+    Each row dict: {"date": "YYYY-MM-DD", "added": ticker or None, "removed": ticker or None}.
+    """
+    table = pd.DataFrame(
+        {
+            ("Effective Date", "Effective Date"): [r["date"] for r in rows],
+            ("Added", "Ticker"): [r["added"] for r in rows],
+            ("Added", "Security"): [f"Company {r['added']}" if r["added"] else None for r in rows],
+            ("Removed", "Ticker"): [r["removed"] for r in rows],
+            ("Removed", "Security"): [f"Company {r['removed']}" if r["removed"] else None for r in rows],
+        }
+    )
+    table.columns = pd.MultiIndex.from_tuples(table.columns)
+    return table.to_html(index=False)
+
+
+def test_fetch_sp500_historical_changes_captures_additions_and_removals():
+    html = _fake_sp500_changes_response(
+        [
+            {"date": "2020-01-01", "added": "AAA", "removed": "BBB"},
+            {"date": "2020-06-01", "added": None, "removed": "CCC"},  # pure removal
+        ]
+    )
+
+    with patch("src.data.ingest.requests.get", return_value=_fake_response(html)):
+        changes = ingest.fetch_sp500_historical_changes()
+
+    assert changes["added_ticker"].iloc[0] == "AAA"
+    assert pd.isna(changes["added_ticker"].iloc[1])  # a pure removal has no added ticker
+    assert changes["removed_ticker"].tolist() == ["BBB", "CCC"]
+
+
+def test_fetch_sp500_historical_changes_normalises_share_classes():
+    html = _fake_sp500_changes_response([{"date": "2020-01-01", "added": "BRK.B", "removed": "BF.B"}])
+
+    with patch("src.data.ingest.requests.get", return_value=_fake_response(html)):
+        changes = ingest.fetch_sp500_historical_changes()
+
+    assert changes["added_ticker"].tolist() == ["BRK-B"]
+    assert changes["removed_ticker"].tolist() == ["BF-B"]
+
+
+def test_fetch_sp500_historical_changes_drops_future_dated_rows():
+    far_future = (date.today() + pd.DateOffset(years=1)).strftime("%Y-%m-%d")
+    html = _fake_sp500_changes_response(
+        [
+            {"date": "2020-01-01", "added": "AAA", "removed": "BBB"},
+            {"date": far_future, "added": "DDD", "removed": "EEE"},
+        ]
+    )
+
+    with patch("src.data.ingest.requests.get", return_value=_fake_response(html)):
+        changes = ingest.fetch_sp500_historical_changes()
+
+    assert changes["added_ticker"].tolist() == ["AAA"]
+
+
 def test_load_or_fetch_sp500_tickers_uses_cache_when_present(tmp_path):
     db_path = tmp_path / "test.duckdb"
     conn = storage.get_connection(db_path)
