@@ -240,6 +240,37 @@ def fetch_sp500_historical_changes() -> pd.DataFrame:
     return changes.sort_values("effective_date").reset_index(drop=True)
 
 
+def reconstruct_sp500_membership(
+    current_constituents: list[str], changes: pd.DataFrame, as_of_date
+) -> list[str]:
+    """Point-in-time S&P 500 membership as of as_of_date, derived from
+    today's constituent list plus every change since (Wikipedia doesn't
+    offer a separate scrape per historical date).
+
+    Walks changes more recent than as_of_date in reverse-chronological
+    order, undoing each one: a ticker added after as_of_date wasn't in the
+    index yet (remove it), a ticker removed after as_of_date hadn't been
+    removed yet (add it back). Must replay sequentially, one row at a
+    time, not as a set operation - confirmed directly that some tickers
+    (e.g. FOX, Q) cross the index boundary more than once within a real
+    date range, and only strict chronological replay resolves that
+    correctly.
+    """
+    as_of_date = pd.Timestamp(as_of_date)
+    membership = set(current_constituents)
+    later_changes = changes[changes["effective_date"] > as_of_date].sort_values(
+        "effective_date", ascending=False
+    )
+
+    for _, change in later_changes.iterrows():
+        if pd.notna(change["added_ticker"]):
+            membership.discard(change["added_ticker"])
+        if pd.notna(change["removed_ticker"]):
+            membership.add(change["removed_ticker"])
+
+    return sorted(membership)
+
+
 def fetch_sp500_tickers() -> list[str]:
     """Just the ticker symbols, for callers that don't need sector info."""
     return fetch_sp500_constituents()["ticker"].tolist()

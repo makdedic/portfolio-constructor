@@ -119,6 +119,59 @@ def test_fetch_sp500_historical_changes_drops_future_dated_rows():
     assert changes["added_ticker"].tolist() == ["AAA"]
 
 
+def test_reconstruct_sp500_membership_excludes_ticker_added_after_as_of_date():
+    changes = pd.DataFrame(
+        {"effective_date": pd.to_datetime(["2020-01-01"]), "added_ticker": ["NEW"], "removed_ticker": [None]}
+    )
+
+    result = ingest.reconstruct_sp500_membership(["NEW", "OLD"], changes, "2015-01-01")
+
+    assert "NEW" not in result
+    assert "OLD" in result
+
+
+def test_reconstruct_sp500_membership_includes_ticker_removed_after_as_of_date():
+    changes = pd.DataFrame(
+        {"effective_date": pd.to_datetime(["2020-01-01"]), "added_ticker": [None], "removed_ticker": ["GONE"]}
+    )
+
+    result = ingest.reconstruct_sp500_membership(["OLD"], changes, "2015-01-01")
+
+    assert "GONE" in result
+    assert "OLD" in result
+
+
+def test_reconstruct_sp500_membership_ignores_changes_before_as_of_date():
+    changes = pd.DataFrame(
+        {"effective_date": pd.to_datetime(["2010-01-01"]), "added_ticker": ["OLD_NEWS"], "removed_ticker": [None]}
+    )
+
+    result = ingest.reconstruct_sp500_membership(["OLD_NEWS", "OTHER"], changes, "2015-01-01")
+
+    assert result == ["OLD_NEWS", "OTHER"]
+
+
+def test_reconstruct_sp500_membership_replays_multi_cycle_tickers_in_order():
+    """A ticker removed, then re-added, both after as_of_date - mirrors a
+    real pattern (e.g. FOX, Q) where a ticker crosses the index boundary
+    more than once in a real date range. Must be replayed newest-first:
+    processed oldest-first, the final answer for this ticker flips.
+    """
+    changes = pd.DataFrame(
+        {
+            "effective_date": pd.to_datetime(["2016-01-01", "2018-01-01"]),
+            "added_ticker": [None, "XYZ"],
+            "removed_ticker": ["XYZ", None],
+        }
+    )
+
+    result = ingest.reconstruct_sp500_membership(["XYZ", "OTHER"], changes, "2015-01-01")
+
+    # XYZ was in the index before either event happened (both are after
+    # as_of_date), so it belongs in the reconstructed membership.
+    assert "XYZ" in result
+
+
 def test_load_or_fetch_sp500_tickers_uses_cache_when_present(tmp_path):
     db_path = tmp_path / "test.duckdb"
     conn = storage.get_connection(db_path)
