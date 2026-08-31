@@ -72,12 +72,21 @@ def _has_no_all_nan_ticker(wide: pd.DataFrame) -> bool:
     return not wide["Adj Close"].isna().all().any()
 
 
-def fetch_price_history(tickers: list[str], start: date, end: date) -> pd.DataFrame:
+def fetch_price_history(tickers: list[str], start: date, end: date, validate: bool = True) -> pd.DataFrame:
     """Daily OHLCV and adjusted close for every ticker.
 
     Columns: date, ticker, open, high, low, close, adj_close, volume.
+
+    validate=False skips the "reject the whole batch if any ticker comes
+    back all-NaN" check - only for the one case where some requested
+    tickers are *expected* to legitimately have no data (e.g. a
+    reconstructed historical S&P 500 ticker that's since been delisted),
+    where that's a real outcome, not a sign of a bad fetch.
+    features.tickers_with_complete_history filters these out downstream,
+    same as any other incomplete-history ticker.
     """
-    wide = _download_with_retry(tickers, start, end, is_valid=_has_no_all_nan_ticker, auto_adjust=False)
+    is_valid = _has_no_all_nan_ticker if validate else None
+    wide = _download_with_retry(tickers, start, end, is_valid=is_valid, auto_adjust=False)
     long = wide.stack(level="Ticker", future_stack=True).reset_index()
     long.columns = [str(column).lower().replace(" ", "_") for column in long.columns]
     return long.sort_values(["ticker", "date"]).reset_index(drop=True)

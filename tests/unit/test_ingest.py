@@ -354,6 +354,18 @@ def test_fetch_price_history_uses_the_retrying_batched_download():
     assert kwargs["auto_adjust"] is False
 
 
+def test_fetch_price_history_validate_false_skips_the_all_nan_check():
+    dates = pd.to_datetime(["2023-01-03"]).rename("Date")
+    columns = pd.MultiIndex.from_tuples([("Close", "AAPL")], names=["Price", "Ticker"])
+    wide = pd.DataFrame([[100.0]], index=dates, columns=columns)
+
+    with patch("src.data.ingest._download_with_retry", return_value=wide) as download_mock:
+        ingest.fetch_price_history(["AAPL"], date(2023, 1, 1), date(2023, 1, 31), validate=False)
+
+    _, kwargs = download_mock.call_args
+    assert kwargs["is_valid"] is None
+
+
 def test_has_no_all_nan_ticker_flags_a_wholly_empty_column_as_invalid():
     dates = pd.to_datetime(["2023-01-03", "2023-01-04"])
     columns = pd.MultiIndex.from_tuples(
