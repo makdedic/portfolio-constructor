@@ -234,6 +234,28 @@ def test_load_or_fetch_sp500_sectors_fetches_and_caches_when_missing(tmp_path):
     fetch_mock.assert_called_once()
 
 
+def test_load_or_fetch_sp500_sectors_does_not_refetch_for_a_ticker_missing_a_sector(tmp_path):
+    """A ticker that's no longer a current S&P 500 constituent (e.g. a
+    reconstructed historical ticker) will never have a sector in this
+    scrape - that alone shouldn't trigger a refetch as long as the cache
+    has already been populated once, or every call involving such a
+    ticker would re-scrape and rebuild the whole table.
+    """
+    db_path = tmp_path / "test.duckdb"
+    conn = storage.get_connection(db_path)
+    storage.replace_sp500_constituents(
+        conn, pd.DataFrame({"ticker": ["AAPL"], "sector": ["Information Technology"]})
+    )
+    conn.close()
+
+    with patch("src.data.storage.config.DUCKDB_PATH", db_path):
+        with patch("src.data.ingest.fetch_sp500_constituents") as fetch_mock:
+            sectors = ingest.load_or_fetch_sp500_sectors(["AAPL", "DELISTED_TICKER"])
+
+    assert sectors == {"AAPL": "Information Technology"}
+    fetch_mock.assert_not_called()
+
+
 def test_load_or_fetch_prices_shares_cached_data_across_overlapping_ticker_sets(tmp_path):
     """The real payoff DuckDB storage exists for, replacing the old
     cache_name stopgap entirely: a request that overlaps an earlier one

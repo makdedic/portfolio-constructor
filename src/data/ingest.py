@@ -312,11 +312,16 @@ def load_or_fetch_sp500_sectors(tickers: list[str]) -> dict[str, str]:
     change. Same simplification already accepted for using today's
     constituent list (survivorship bias). Same always-close-the-connection
     reasoning as load_or_fetch_prices.
+
+    Only refetches when the cache has never been populated, not whenever
+    any requested ticker lacks a sector - a ticker that's no longer a
+    current constituent (e.g. a reconstructed historical S&P 500 ticker)
+    will never get one from this scrape, and re-scraping every single call
+    on that basis would be pure waste. Callers already treat a missing
+    sector as "Unknown", not an error.
     """
     with storage.get_connection() as conn:
-        sectors = storage.sp500_sectors_cached(conn, tickers)
-        if len(sectors) < len(set(tickers)):
+        if not storage.sp500_tickers_cached(conn):
             constituents = fetch_sp500_constituents()
             storage.replace_sp500_constituents(conn, constituents)
-            sectors = storage.sp500_sectors_cached(conn, tickers)
-        return sectors
+        return storage.sp500_sectors_cached(conn, tickers)
