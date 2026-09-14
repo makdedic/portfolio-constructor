@@ -285,20 +285,61 @@ def fetch_sp500_tickers() -> list[str]:
     return fetch_sp500_constituents()["ticker"].tolist()
 
 
-def load_or_fetch_sp500_tickers() -> list[str]:
+def load_or_fetch_sp500_tickers(as_of_date: date | None = None) -> list[str]:
     """Read cached constituent list if present, otherwise fetch and cache it.
 
     Cached (not re-scraped every run) so a given backtest's universe stays
     stable and reproducible even if Wikipedia's page changes later. Same
     always-close-the-connection reasoning as load_or_fetch_prices.
+
+    as_of_date reconstructs point-in-time membership from Wikipedia's
+    historical S&P 500 changes log (reconstruct_sp500_membership) instead
+    of returning today's list applied retroactively - the survivorship
+    bias this project otherwise accepts. None (the default) is unchanged
+    from before this parameter existed.
+
+    Recovered tickers (in the index back then, not today) are checked for
+    real price data before being included: many are no longer tradeable
+    at all (delisted or acquired), which no amount of retrying fixes.
+    features.tickers_with_complete_history would exclude them downstream
+    anyway, but checking here avoids caching them as if the fetch had
+    covered them, and avoids wasting a fetch attempt on them every run. If
+    that check itself fails (e.g. rate-limited), this falls back to
+    today's list - the existing, already-reliable behaviour - rather than
+    raising.
     """
     with storage.get_connection() as conn:
-        cached = storage.sp500_tickers_cached(conn)
-        if cached:
-            return cached
-        constituents = fetch_sp500_constituents()
-        storage.replace_sp500_constituents(conn, constituents)
-        return constituents["ticker"].tolist()
+        current_tickers = storage.sp500_tickers_cached(conn)
+        if not current_tickers:
+            constituents = fetch_sp500_constituents()
+            storage.replace_sp500_constituents(conn, constituents)
+            current_tickers = constituents["ticker"].tolist()
+
+        if as_of_date is None:
+            return current_tickers
+
+        changes = storage.sp500_historical_changes_cached(conn)
+        if changes.empty:
+            changes = fetch_sp500_historical_changes()
+            storage.replace_sp500_historical_changes(conn, changes)
+
+    reconstructed = reconstruct_sp500_membership(current_tickers, changes, as_of_date)
+    recovered = sorted(set(reconstructed) - set(current_tickers))
+    if not recovered:
+        return current_tickers
+
+    try:
+        fetched = fetch_price_history(recovered, config.DATA_START_DATE, config.DATA_END_DATE, validate=False)
+    except YFRateLimitError:
+        return current_tickers
+
+    tradeable = fetched.dropna(subset=["adj_close"])["ticker"].unique().tolist()
+    if tradeable:
+        with storage.get_connection() as conn:
+            storage.upsert_prices(conn, fetched[fetched["ticker"].isin(tradeable)])
+            storage.log_fetch(conn, "prices", tradeable, config.DATA_START_DATE, config.DATA_END_DATE)
+
+    return sorted(set(current_tickers) | set(tradeable))
 
 
 def load_or_fetch_sp500_sectors(tickers: list[str]) -> dict[str, str]:

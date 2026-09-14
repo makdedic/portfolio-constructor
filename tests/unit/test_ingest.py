@@ -206,6 +206,96 @@ def test_load_or_fetch_sp500_tickers_fetches_and_caches_when_missing(tmp_path):
     conn.close()
 
 
+def test_load_or_fetch_sp500_tickers_as_of_date_includes_tradeable_recovered_tickers(tmp_path):
+    db_path = tmp_path / "test.duckdb"
+    conn = storage.get_connection(db_path)
+    storage.replace_sp500_constituents(
+        conn, pd.DataFrame({"ticker": ["AAPL"], "sector": ["Information Technology"]})
+    )
+    storage.replace_sp500_historical_changes(
+        conn, pd.DataFrame({"effective_date": [date(2020, 1, 1)], "added_ticker": [None], "removed_ticker": ["OLDCO"]})
+    )
+    conn.close()
+
+    fake_prices = pd.DataFrame(
+        {
+            "date": [date(2015, 1, 2)],
+            "ticker": ["OLDCO"],
+            "open": [50.0],
+            "high": [50.0],
+            "low": [50.0],
+            "close": [50.0],
+            "adj_close": [50.0],
+            "volume": [1000.0],
+        }
+    )
+    with patch("src.data.storage.config.DUCKDB_PATH", db_path):
+        with patch("src.data.ingest.fetch_price_history", return_value=fake_prices) as fetch_mock:
+            result = ingest.load_or_fetch_sp500_tickers(as_of_date=date(2015, 1, 1))
+
+    assert result == ["AAPL", "OLDCO"]
+    fetch_mock.assert_called_once_with(["OLDCO"], config.DATA_START_DATE, config.DATA_END_DATE, validate=False)
+
+
+def test_load_or_fetch_sp500_tickers_as_of_date_excludes_untradeable_recovered_tickers(tmp_path):
+    db_path = tmp_path / "test.duckdb"
+    conn = storage.get_connection(db_path)
+    storage.replace_sp500_constituents(
+        conn, pd.DataFrame({"ticker": ["AAPL"], "sector": ["Information Technology"]})
+    )
+    storage.replace_sp500_historical_changes(
+        conn, pd.DataFrame({"effective_date": [date(2020, 1, 1)], "added_ticker": [None], "removed_ticker": ["DEADCO"]})
+    )
+    conn.close()
+
+    fake_prices = pd.DataFrame({"date": [date(2015, 1, 2)], "ticker": ["DEADCO"], "adj_close": [None]})
+    with patch("src.data.storage.config.DUCKDB_PATH", db_path):
+        with patch("src.data.ingest.fetch_price_history", return_value=fake_prices):
+            result = ingest.load_or_fetch_sp500_tickers(as_of_date=date(2015, 1, 1))
+
+    assert result == ["AAPL"]
+
+
+def test_load_or_fetch_sp500_tickers_as_of_date_falls_back_on_fetch_failure(tmp_path):
+    db_path = tmp_path / "test.duckdb"
+    conn = storage.get_connection(db_path)
+    storage.replace_sp500_constituents(
+        conn, pd.DataFrame({"ticker": ["AAPL"], "sector": ["Information Technology"]})
+    )
+    storage.replace_sp500_historical_changes(
+        conn, pd.DataFrame({"effective_date": [date(2020, 1, 1)], "added_ticker": [None], "removed_ticker": ["OLDCO"]})
+    )
+    conn.close()
+
+    with patch("src.data.storage.config.DUCKDB_PATH", db_path):
+        with patch("src.data.ingest.fetch_price_history", side_effect=YFRateLimitError()):
+            result = ingest.load_or_fetch_sp500_tickers(as_of_date=date(2015, 1, 1))
+
+    assert result == ["AAPL"]
+
+
+def test_load_or_fetch_sp500_tickers_as_of_date_skips_fetch_when_nothing_recovered(tmp_path):
+    db_path = tmp_path / "test.duckdb"
+    conn = storage.get_connection(db_path)
+    storage.replace_sp500_constituents(
+        conn, pd.DataFrame({"ticker": ["AAPL"], "sector": ["Information Technology"]})
+    )
+    # A change that predates as_of_date is irrelevant to reconstruction -
+    # only present to keep the cache non-empty, so this doesn't trigger a
+    # live changes-log fetch too.
+    storage.replace_sp500_historical_changes(
+        conn, pd.DataFrame({"effective_date": [date(2010, 1, 1)], "added_ticker": ["AAPL"], "removed_ticker": [None]})
+    )
+    conn.close()
+
+    with patch("src.data.storage.config.DUCKDB_PATH", db_path):
+        with patch("src.data.ingest.fetch_price_history") as fetch_mock:
+            result = ingest.load_or_fetch_sp500_tickers(as_of_date=date(2015, 1, 1))
+
+    assert result == ["AAPL"]
+    fetch_mock.assert_not_called()
+
+
 def test_load_or_fetch_sp500_sectors_uses_cache_when_present(tmp_path):
     db_path = tmp_path / "test.duckdb"
     conn = storage.get_connection(db_path)
