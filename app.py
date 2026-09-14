@@ -46,8 +46,8 @@ def run_pipeline_cached(
 
 
 @st.cache_data(show_spinner="Fetching S&P 500 constituent list...")
-def load_sp500_tickers_cached() -> list[str]:
-    return ingest.load_or_fetch_sp500_tickers()
+def load_sp500_tickers_cached(as_of_date) -> list[str]:
+    return ingest.load_or_fetch_sp500_tickers(as_of_date=as_of_date)
 
 
 @st.cache_data(show_spinner="Fetching sector classifications...")
@@ -66,10 +66,12 @@ if universe_choice == DEV_UNIVERSE_LABEL:
     )
 else:
     st.sidebar.caption(
-        "First run fetches and caches ~500 tickers (~1-2 min); subsequent runs are fast. "
+        "Reconstructed as of the backtest start date, not today's list applied "
+        "retroactively — reduces (doesn't eliminate) survivorship bias. First run "
+        "fetches and caches ~500+ tickers (~1-2 min); subsequent runs are fast. "
         "Tickers without enough price history for the backtest range are excluded automatically."
     )
-    selected_tickers = load_sp500_tickers_cached()
+    selected_tickers = load_sp500_tickers_cached(config.BACKTEST_START_DATE)
 
 st.sidebar.header("Strategy")
 rank_choice = st.sidebar.selectbox("Ranker", list(RANK_FN_OPTIONS.keys()))
