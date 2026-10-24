@@ -85,6 +85,10 @@ def _load_seed(conn: duckdb.DuckDBPyConnection) -> None:
     Only date, ticker, adj_close are seeded for prices (see
     scripts/build_seed.py for why) - open/high/low/close/volume stay NULL
     for these rows, which is safe since nothing in this codebase reads them.
+
+    Covers the reconstructed point-in-time S&P 500 universe, not just
+    today's constituents - seeded_tickers.parquet records exactly which
+    tickers that is, since sp500_tickers only ever holds today's list.
     """
     tickers_path = config.SEED_DIR / "sp500_tickers.parquet"
     if not tickers_path.exists():
@@ -93,6 +97,11 @@ def _load_seed(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute(
         f"""INSERT INTO sp500_tickers (ticker, sector)
             SELECT ticker, sector FROM read_parquet('{tickers_path}')"""
+    )
+    conn.execute(
+        f"""INSERT INTO sp500_historical_changes (effective_date, added_ticker, removed_ticker)
+            SELECT effective_date, added_ticker, removed_ticker
+            FROM read_parquet('{config.SEED_DIR / "sp500_historical_changes.parquet"}')"""
     )
     conn.execute(
         f"""INSERT INTO prices (date, ticker, adj_close)
@@ -108,7 +117,12 @@ def _load_seed(conn: duckdb.DuckDBPyConnection) -> None:
             FROM read_parquet('{config.SEED_DIR / "risk_free_rate.parquet"}')"""
     )
 
-    seeded_tickers = [row[0] for row in conn.execute("SELECT ticker FROM sp500_tickers").fetchall()]
+    seeded_tickers = [
+        row[0]
+        for row in conn.execute(
+            f"SELECT ticker FROM read_parquet('{config.SEED_DIR / 'seeded_tickers.parquet'}')"
+        ).fetchall()
+    ]
     prices_through = conn.execute("SELECT MAX(date) FROM prices").fetchone()[0]
     dividends_through = conn.execute("SELECT MAX(date) FROM dividends").fetchone()[0]
     rate_through = conn.execute("SELECT MAX(date) FROM risk_free_rate").fetchone()[0]

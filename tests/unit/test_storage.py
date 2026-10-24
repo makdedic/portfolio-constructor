@@ -206,8 +206,12 @@ def test_get_connection_loads_the_committed_seed_into_a_fresh_database(tmp_path)
         seed_dir / "sp500_tickers.parquet"
     )
     pd.DataFrame(
+        {"effective_date": pd.to_datetime(["2019-01-01"]), "added_ticker": ["AAPL"], "removed_ticker": [None]}
+    ).to_parquet(seed_dir / "sp500_historical_changes.parquet")
+    pd.DataFrame(
         {"date": pd.to_datetime(["2020-01-02"]), "ticker": ["AAPL"], "adj_close": [100.0]}
     ).to_parquet(seed_dir / "prices.parquet")
+    pd.DataFrame({"ticker": ["AAPL"]}).to_parquet(seed_dir / "seeded_tickers.parquet")
     pd.DataFrame(
         {"date": pd.to_datetime(["2020-01-15"]), "ticker": ["AAPL"], "dividend_amount": [0.2]}
     ).to_parquet(seed_dir / "dividends.parquet")
