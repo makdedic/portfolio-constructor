@@ -183,11 +183,23 @@ and still comfortably ahead net.
 
 Where these results should and shouldn't be trusted:
 
-- **Survivorship bias** — the S&P 500 universe uses today's constituent
-  list applied retroactively across the whole 2015-2026 backtest.
-  Companies removed from the index over that period (usually because they
-  performed badly) never appear as candidates, which flatters the
-  full-universe results more than the headline numbers alone suggest.
+- **Survivorship bias (reduced, not eliminated)** — the full S&P 500
+  universe now reconstructs point-in-time membership as of the backtest
+  start date from Wikipedia's historical index changes, instead of
+  applying today's constituent list retroactively (`as_of_date` on
+  `ingest.load_or_fetch_sp500_tickers`). This recovers 175 tickers no
+  longer in today's list, of which 72 still have usable price data (the
+  rest are delisted beyond recovery). Counterintuitively, this *raised*
+  the default strategy's Sharpe slightly (0.615 → 0.658 net, still below
+  SPY's 0.725 either way) rather than lowering it — not every index
+  departure is a loser: several recovered names left via acquisition at a
+  premium, a real return event the today's-list version was silently
+  excluding along with the genuine underperformers. The bias isn't fully
+  gone even so: a current constituent that IPO'd or was added to the
+  index after 2015 is still included throughout the backtest (downstream
+  history-completeness filtering drops the ones without full price
+  history, but not ones that simply existed as public companies before
+  joining the index).
 - **One historical path** — the backtest runs once over a single realised
   sequence of market history, not resampled or stress-tested against
   alternate scenarios. Split into three regimes to check this directly
